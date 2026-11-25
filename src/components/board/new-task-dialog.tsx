@@ -1,0 +1,107 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
+import { Loader2, Wand2 } from "lucide-react";
+import type { TaskPriority } from "@/db/schema";
+import type { TaskDTO } from "@/lib/realtime-protocol";
+import { createTaskAction } from "@/actions/task.actions";
+import { triageTaskAction } from "@/actions/ai.actions";
+import { Button } from "@/components/ui/button";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { Sheet } from "./sheet";
+import type { BoardCtx } from "./kanban-board";
+
+export function NewTaskDialog({ ctx, initialColumnId, onClose, onCreated }: { ctx: BoardCtx; initialColumnId?: string; onClose: () => void; onCreated: (t: TaskDTO) => void }) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [columnId, setColumnId] = useState(initialColumnId ?? ctx.columns[0]?.id ?? "");
+  const [assigneeId, setAssigneeId] = useState("");
+  const [triage, setTriage] = useState<{ rationale: string; provider: string; labels: string[] } | null>(null);
+  const [pending, start] = useTransition();
+  const [aiPending, startAi] = useTransition();
+
+  return (
+    <Sheet side="center" title="New task" onClose={onClose}>
+      <form
+        className="space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          start(async () => {
+            const r = await createTaskAction({ organizationId: ctx.org.id, columnId, title, description: description || null, priority, assigneeId: assigneeId || null });
+            if (!r.ok) return void toast.error(r.message);
+            onCreated(r.task);
+            toast.success(`Created ${ctx.project.key}-${r.task.taskNumber}`);
+            onClose();
+          });
+        }}
+      >
+        <div className="space-y-1">
+          <Label htmlFor="n-title">Title</Label>
+          <Input id="n-title" autoFocus required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Checkout page crashes for EU customers" />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="n-desc">Description</Label>
+          <Textarea id="n-desc" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} />
+        </div>
+
+        <div className="rounded-md border border-dashed border-border p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-muted">Let AI suggest priority & starting column (you can override).</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!title.trim() || aiPending}
+              onClick={() =>
+                startAi(async () => {
+                  const r = await triageTaskAction(ctx.org.id, ctx.project.id, title, description);
+                  if (!r.ok) return void toast.error(r.message);
+                  setPriority(r.suggestion.priority);
+                  setColumnId(r.suggestion.columnId);
+                  setTriage({ rationale: r.suggestion.rationale, provider: r.provider, labels: r.suggestion.labels });
+                })
+              }
+            >
+              {aiPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} AI triage
+            </Button>
+          </div>
+          {triage && (
+            <p className="mt-2 text-xs">
+              {triage.rationale}
+              {triage.labels.length > 0 && <span className="text-muted"> · labels: {triage.labels.join(", ")}</span>}
+              <span className="text-muted"> · via {triage.provider}</span>
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="n-pri">Priority</Label>
+            <Select id="n-pri" value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}>
+              {(["low", "medium", "high", "urgent"] as const).map((p) => <option key={p} value={p}>{p}</option>)}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="n-col">Column</Label>
+            <Select id="n-col" value={columnId} onChange={(e) => setColumnId(e.target.value)}>
+              {ctx.columns.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="n-asg">Assignee</Label>
+            <Select id="n-asg" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+              <option value="">Unassigned</option>
+              {ctx.members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </Select>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={pending || !title.trim()}>{pending ? "Creating…" : "Create task"}</Button>
+        </div>
+      </form>
+    </Sheet>
+  );
+}

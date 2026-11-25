@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+/*
+ * SyncSprint design tokens — ClickUp-inspired: bright, airy work surface,
+ * signature purple brand, color-coded statuses and priorities.
+ */
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Larger-than-default type scale for comfortable reading on big screens. */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.25rem;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.45rem;
+  --text-base: 1.0625rem;
+  --text-base--line-height: 1.65rem;
+  --text-lg: 1.1875rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.125rem;
+
+  /* Surfaces */
+  --color-background: #ffffff;
+  --color-canvas: #f7f8fa;      /* board / page canvas */
+  --color-sidebar: #fafbfc;
+  --color-card: #ffffff;
+  --color-elevated: #ffffff;
+  --color-surface-2: #f4f5f7;   /* inset panels, inputs, rows */
+  --color-hover: #f0f1f4;
+  --color-border: #e8eaed;
+  --color-border-strong: #d5d9df;
+
+  /* Text */
+  --color-foreground: #292d34;
+  --color-muted: #646a73;
+  --color-subtle: #8f949c;
+
+  /* Brand (ClickUp purple) */
+  --color-primary: #7b68ee;
+  --color-primary-dark: #6252d9;
+  --color-primary-soft: #f1efff;
+  --color-primary-foreground: #ffffff;
+  --color-accent: #49ccf9;
+
+  /* Status palette */
+  --color-status-todo: #87909e;
+  --color-status-progress: #7b68ee;
+  --color-status-review: #ff9800;
+  --color-status-done: #2db87d;
+
+  --shadow-card: 0 1px 2px rgba(23, 28, 36, 0.06), 0 0 0 1px rgba(23, 28, 36, 0.02);
+  --shadow-lift: 0 6px 20px -4px rgba(23, 28, 36, 0.14), 0 2px 6px rgba(23, 28, 36, 0.06);
+  --shadow-glow: 0 12px 32px -8px rgba(123, 104, 238, 0.45), 0 0 0 2px rgba(123, 104, 238, 0.55);
+
+  --animate-flash: flash 1.6s ease-out;
+  --animate-fade-up: fade-up 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-slide-in: slide-in 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+
+  @keyframes flash {
+    0% { box-shadow: 0 0 0 2px #ffb020, 0 0 20px rgba(255, 176, 32, 0.45); }
+    100% { box-shadow: var(--shadow-card); }
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateX(24px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+
+::selection {
+  background: rgba(123, 104, 238, 0.22);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d5d9df transparent;
+}
+
+@utility bg-grid {
+  background-image:
+    linear-gradient(rgba(123, 104, 238, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(123, 104, 238, 0.07) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+@utility text-gradient {
+  background: linear-gradient(110deg, #7b68ee 0%, #fd71af 50%, #49ccf9 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility bg-brand {
+  background: linear-gradient(135deg, #8e7cf5 0%, #7b68ee 55%, #6a57e6 100%);
+}
