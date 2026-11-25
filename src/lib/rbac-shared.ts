@@ -19,6 +19,7 @@ export const PERMISSIONS = {
   COMMENT: "member",
   USE_AI: "member",
   MANAGE_PROJECTS: "admin",
+  MANAGE_SPRINTS: "admin",
   INVITE_OR_CHANGE_ROLES: "admin",
   DELETE_ORGANIZATION: "owner",
 } as const satisfies Record<string, OrgRole>;

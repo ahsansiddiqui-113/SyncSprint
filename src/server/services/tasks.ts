@@ -14,6 +14,9 @@ import {
 import { AppError } from "@/lib/errors";
 import { MIN_GAP, POSITION_STEP, rebalancePositions } from "@/lib/fractional-index";
 import { requireOrgPermission } from "@/lib/rbac";
+import { assertAssignableSprint, recordSprintSnapshots } from "./sprints";
+
+export const workItemTypeSchema = z.enum(["epic", "story", "task", "bug"]);
 
 export const prioritySchema = z.enum(["low", "medium", "high", "urgent"]);
 
@@ -102,6 +105,8 @@ export const createTaskInput = z.object({
   dueDate: dateSchema.nullish(),
   storyPoints: pointsSchema.nullish(),
   parentId: z.string().uuid().nullish(),
+  type: workItemTypeSchema.default("task"),
+  sprintId: z.string().uuid().nullish(),
 });
 
 export async function createTask(conn: DB, actorId: string, raw: z.input<typeof createTaskInput>) {
@@ -111,6 +116,7 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
 
   return conn.transaction(async (tx) => {
     const col = await assertColumnInOrg(tx, input.organizationId, input.columnId);
+    if (input.sprintId) await assertAssignableSprint(tx, input.organizationId, col.projectId, input.sprintId);
     if (input.parentId) {
       const [parent] = await tx
         .select({ projectId: tasks.projectId, parentId: tasks.parentId })
@@ -154,6 +160,8 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
         dueDate: input.dueDate ?? null,
         storyPoints: input.storyPoints ?? null,
         parentId: input.parentId ?? null,
+        type: input.type,
+        sprintId: input.sprintId ?? null,
         position: (last?.position ?? 0) + POSITION_STEP,
       })
       .returning();
@@ -166,6 +174,7 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
       entityId: task!.id,
       metadata: { ref: `${project.key}-${task!.taskNumber}`, title: task!.title, columnId: input.columnId, parentId: input.parentId ?? null },
     });
+    await recordSprintSnapshots(tx, input.organizationId, [task!.sprintId]);
     return task!;
   });
 }
@@ -250,6 +259,7 @@ export async function moveTask(conn: DB, actorId: string, raw: z.input<typeof mo
       },
     });
 
+    await recordSprintSnapshots(tx, input.organizationId, [updated.sprintId]);
     return { ok: true as const, task: finalTask, rebalanced };
   });
 }
@@ -269,6 +279,8 @@ export const updateTaskInput = z.object({
       startDate: dateSchema.nullable(),
       dueDate: dateSchema.nullable(),
       storyPoints: pointsSchema.nullable(),
+      type: workItemTypeSchema,
+      sprintId: z.string().uuid().nullable(),
     })
     .partial(),
 });
@@ -293,6 +305,7 @@ export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof 
       input.patch.startDate !== undefined ? input.patch.startDate : before.startDate,
       input.patch.dueDate !== undefined ? input.patch.dueDate : before.dueDate
     );
+    if (input.patch.sprintId) await assertAssignableSprint(tx, input.organizationId, before.projectId, input.patch.sprintId);
 
     const [updated] = await tx
       .update(tasks)
@@ -322,6 +335,8 @@ export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof 
       entityId: updated.id,
       metadata: { changes, version: updated.version },
     });
+    // Points or sprint membership changes move burndown lines (old and new sprint).
+    await recordSprintSnapshots(tx, input.organizationId, [before.sprintId, updated.sprintId]);
     return { ok: true as const, task: updated, changes: Object.keys(changes) };
   });
 }
@@ -344,6 +359,7 @@ export async function deleteTask(conn: DB, actorId: string, organizationId: stri
       entityId: deleted.id,
       metadata: { title: deleted.title, taskNumber: deleted.taskNumber },
     });
+    await recordSprintSnapshots(tx, organizationId, [deleted.sprintId]);
     return deleted;
   });
 }

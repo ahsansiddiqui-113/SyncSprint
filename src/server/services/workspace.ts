@@ -416,6 +416,13 @@ export const AUDIT_ACTIONS = [
   "INVITE_REVOKED",
   "ORG_CREATED",
   "AI_SUBTASKS_ADDED",
+  "CHECKLIST_ITEM_ADDED",
+  "CHECKLIST_ITEM_DONE",
+  "TAG_ADDED",
+  "DEPENDENCY_ADDED",
+  "SPRINT_CREATED",
+  "SPRINT_STARTED",
+  "SPRINT_COMPLETED",
 ] as const;
 
 export async function listAuditLogs(

@@ -9,6 +9,8 @@ import { CheckRow, Popover } from "@/components/ui/popover";
 import { activeFilterCount, EMPTY_FILTERS, type Filters } from "./filters";
 import type { Member } from "./kanban-board";
 import type { TagInfo } from "./decor";
+import { TYPE_META, TypeIcon, WORK_ITEM_TYPES } from "./task-meta";
+import type { SprintDTO } from "@/server/services/sprints";
 
 const PRIORITIES: TaskPriority[] = ["urgent", "high", "medium", "low"];
 
@@ -36,6 +38,7 @@ export function FilterBar({
   onChange,
   members,
   tags,
+  sprints,
   shown,
   total,
 }: {
@@ -43,6 +46,7 @@ export function FilterBar({
   onChange: (f: Filters) => void;
   members: Member[];
   tags: TagInfo[];
+  sprints: SprintDTO[];
   shown: number;
   total: number;
 }) {
@@ -98,6 +102,42 @@ export function FilterBar({
           </CheckRow>
         ))}
       </Popover>
+
+      <Popover
+        trigger={() => (
+          <Chip active={filters.types.length > 0}>
+            Type{filters.types.length ? ` · ${filters.types.length}` : ""} <ChevronDown className="h-3.5 w-3.5" />
+          </Chip>
+        )}
+      >
+        {WORK_ITEM_TYPES.map((t) => (
+          <CheckRow key={t} checked={filters.types.includes(t)} onChange={() => set({ types: toggle(filters.types, t) })}>
+            <TypeIcon type={t} size={18} /> {TYPE_META[t].label}
+          </CheckRow>
+        ))}
+      </Popover>
+
+      {sprints.some((s) => s.status !== "completed") && (
+        <Popover
+          trigger={() => (
+            <Chip active={!!filters.sprint}>
+              {filters.sprint === "__backlog" ? "Backlog" : filters.sprint ? (sprints.find((s) => s.id === filters.sprint)?.name ?? "Sprint") : "Sprint"}
+              <ChevronDown className="h-3.5 w-3.5" />
+            </Chip>
+          )}
+        >
+          <CheckRow checked={!filters.sprint} onChange={() => set({ sprint: "" })}>Any sprint</CheckRow>
+          {sprints
+            .filter((s) => s.status !== "completed")
+            .map((s) => (
+              <CheckRow key={s.id} checked={filters.sprint === s.id} onChange={() => set({ sprint: s.id })}>
+                <span className="truncate">{s.name}</span>
+                {s.status === "active" && <span className="ml-auto rounded bg-emerald-50 px-1.5 text-[12px] font-semibold text-emerald-700">Active</span>}
+              </CheckRow>
+            ))}
+          <CheckRow checked={filters.sprint === "__backlog"} onChange={() => set({ sprint: "__backlog" })}>Backlog (no sprint)</CheckRow>
+        </Popover>
+      )}
 
       {tags.length > 0 && (
         <Popover

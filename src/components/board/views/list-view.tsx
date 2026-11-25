@@ -6,7 +6,7 @@ import { timeAgo, cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { PRIORITY_STYLE, PriorityFlag, StatusPill } from "@/components/ui/badge";
 import { groupByColumn } from "../board-state";
-import { BreakdownBadges, DueChip, ParentRef, PointsBadge } from "../task-meta";
+import { BreakdownBadges, DueChip, ParentRef, PointsBadge, TypeIcon } from "../task-meta";
 import type { ViewProps } from "./types";
 
 const GRID = "grid grid-cols-[minmax(0,1fr)_160px_120px_120px_70px_100px_100px]";
@@ -66,6 +66,7 @@ export function ListView(props: ViewProps) {
                       >
                         <span className="flex min-w-0 items-center gap-3">
                           <span className="h-3.5 w-3.5 shrink-0 rounded-full border-2" style={{ borderColor: color, backgroundColor: done ? color : "transparent" }} />
+                          <TypeIcon type={t.type} size={17} />
                           <span className="flex min-w-0 flex-col">
                             <span className="flex min-w-0 items-center gap-2">
                               <span className={cn("truncate font-medium", done && "text-muted line-through decoration-black/25")}>{t.title}</span>

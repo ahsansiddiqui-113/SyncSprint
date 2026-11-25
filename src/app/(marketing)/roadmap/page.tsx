@@ -24,12 +24,12 @@ const PHASES: { name: string; status: Status; items: string[] }[] = [
   },
   {
     name: "Sprints & agile",
-    status: "next",
-    items: ["Sprints with dates and capacity", "Backlog and sprint planning", "Burndown and burnup charts", "Velocity across sprints", "Epics, features, stories and bugs"],
+    status: "shipped",
+    items: ["Sprints with goals and dates", "Backlog and sprint planning", "Burndown and burnup charts", "Velocity across sprints", "Epics, stories, tasks and bugs"],
   },
   {
     name: "Customization",
-    status: "planned",
+    status: "next",
     items: ["Custom statuses per project", "Custom fields", "Spreadsheet-style table view", "Saved views", "Multiple assignees and watchers"],
   },
   {

@@ -1,4 +1,5 @@
-import { Ban, CalendarDays, CornerDownRight, GitBranch, ListChecks } from "lucide-react";
+import { Ban, Bookmark, Bug, CalendarDays, CornerDownRight, GitBranch, ListChecks, SquareCheck, Zap } from "lucide-react";
+import type { WorkItemType } from "@/db/schema";
 import { dueState, relativeDueLabel, type DueState } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import type { TaskDecor } from "./decor";
@@ -118,6 +119,32 @@ export function ParentRef({ parent, refLabel, className }: { parent: { title: st
       <CornerDownRight className="h-3.5 w-3.5 shrink-0" />
       <span className="shrink-0 font-medium">{refLabel}</span>
       <span className="truncate">{parent.title}</span>
+    </span>
+  );
+}
+
+/* ------------------------------- Phase 3 ------------------------------- */
+
+export const TYPE_META: Record<WorkItemType, { label: string; icon: typeof Zap; color: string }> = {
+  epic: { label: "Epic", icon: Zap, color: "#8a5cf6" },
+  story: { label: "Story", icon: Bookmark, color: "#0f9d74" },
+  task: { label: "Task", icon: SquareCheck, color: "#3f7cb8" },
+  bug: { label: "Bug", icon: Bug, color: "#dc2626" },
+};
+export const WORK_ITEM_TYPES: WorkItemType[] = ["epic", "story", "task", "bug"];
+
+/** Work item type glyph: a filled tile with a distinct icon per type (+ title for screen readers). */
+export function TypeIcon({ type, size = 18, className }: { type: WorkItemType; size?: number; className?: string }) {
+  const m = TYPE_META[type];
+  return (
+    <span
+      title={m.label}
+      aria-label={m.label}
+      role="img"
+      className={cn("inline-flex shrink-0 items-center justify-center rounded text-white", className)}
+      style={{ width: size, height: size, backgroundColor: m.color }}
+    >
+      <m.icon style={{ width: size * 0.65, height: size * 0.65 }} strokeWidth={2.5} />
     </span>
   );
 }

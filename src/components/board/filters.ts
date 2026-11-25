@@ -1,4 +1,4 @@
-import type { TaskPriority } from "@/db/schema";
+import type { TaskPriority, WorkItemType } from "@/db/schema";
 import type { TaskDTO } from "@/lib/realtime-protocol";
 
 export type Filters = {
@@ -8,12 +8,15 @@ export type Filters = {
   onlyMine: boolean;
   hideDone: boolean;
   tagIds: string[];
+  types: WorkItemType[];
+  /** "" = any sprint, "__backlog" = no sprint, otherwise a sprint id. */
+  sprint: string;
 };
 
-export const EMPTY_FILTERS: Filters = { q: "", assignees: [], priorities: [], onlyMine: false, hideDone: false, tagIds: [] };
+export const EMPTY_FILTERS: Filters = { q: "", assignees: [], priorities: [], onlyMine: false, hideDone: false, tagIds: [], types: [], sprint: "" };
 
 export function activeFilterCount(f: Filters) {
-  return (f.q.trim() ? 1 : 0) + f.assignees.length + f.priorities.length + (f.onlyMine ? 1 : 0) + (f.hideDone ? 1 : 0) + f.tagIds.length;
+  return (f.q.trim() ? 1 : 0) + f.assignees.length + f.priorities.length + (f.onlyMine ? 1 : 0) + (f.hideDone ? 1 : 0) + f.tagIds.length + f.types.length + (f.sprint ? 1 : 0);
 }
 
 /**
@@ -34,6 +37,8 @@ export function applyFilters(
     if (f.assignees.length && !f.assignees.includes(t.assigneeId ?? "__none")) continue;
     if (f.priorities.length && !f.priorities.includes(t.priority)) continue;
     if (f.hideDone && t.columnId === ctx.doneColumnId) continue;
+    if (f.types.length && !f.types.includes(t.type)) continue;
+    if (f.sprint && (f.sprint === "__backlog" ? t.sprintId !== null : t.sprintId !== f.sprint)) continue;
     // Tag filter matches tasks carrying ANY of the selected tags.
     if (f.tagIds.length && !(ctx.tagsByTask?.[t.id] ?? []).some((id) => f.tagIds.includes(id))) continue;
     out[t.id] = t;

@@ -22,6 +22,13 @@
       "when": 1795632611597,
       "tag": "0002_work_breakdown",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795633635373,
+      "tag": "0003_sprints",
+      "breakpoints": true
     }
   ]
 }

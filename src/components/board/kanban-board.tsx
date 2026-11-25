@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarDays, ChartGantt, ChevronRight, Eye, Kanban, LayoutDashboard, List as ListIcon, Plus, Shuffle, Sparkles } from "lucide-react";
+import { CalendarDays, ChartGantt, ChevronRight, Eye, Kanban, LayoutDashboard, List as ListIcon, Plus, Rocket, Shuffle, Sparkles } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import type { OrgEvent, PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -12,6 +12,8 @@ import { explainConflictAction } from "@/actions/ai.actions";
 import { getBoardSnapshotAction, moveTaskAction, updateTaskAction } from "@/actions/task.actions";
 import { simulateTeammateAction } from "@/actions/demo.actions";
 import { getProjectMetaAction } from "@/actions/breakdown.actions";
+import { listSprintsAction } from "@/actions/sprint.actions";
+import type { SprintDTO } from "@/server/services/sprints";
 import type { ProjectMeta } from "@/server/services/breakdown";
 import { POSITION_STEP } from "@/lib/fractional-index";
 import { Avatar } from "@/components/ui/avatar";
@@ -30,6 +32,7 @@ import { ListView } from "./views/list-view";
 import { CalendarView } from "./views/calendar-view";
 import { TimelineView } from "./views/timeline-view";
 import { DashboardView } from "./views/dashboard-view";
+import { SprintsView } from "./views/sprints-view";
 import { VIEWS, type TaskPatch, type ViewId, type ViewProps } from "./views/types";
 
 export type Member = { id: string; name: string; avatarUrl: string | null; role: OrgRole };
@@ -47,6 +50,7 @@ export type BoardCtx = {
 const VIEW_META: Record<ViewId, { label: string; icon: typeof Kanban }> = {
   board: { label: "Board", icon: Kanban },
   list: { label: "List", icon: ListIcon },
+  sprints: { label: "Sprints", icon: Rocket },
   calendar: { label: "Calendar", icon: CalendarDays },
   timeline: { label: "Timeline", icon: ChartGantt },
   dashboard: { label: "Dashboard", icon: LayoutDashboard },
@@ -75,6 +79,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const [meta, setMeta] = useState<ProjectMeta>(EMPTY_META);
   /** Bumped whenever meta reloads, so an open drawer refetches its checklist. */
   const [metaVersion, setMetaVersion] = useState(0);
+  const [sprints, setSprints] = useState<SprintDTO[]>([]);
   const [simPending, startSim] = useTransition();
   /** `${taskId}:${version}` of writes this tab made, to tell our own echoes from another tab's. */
   const ownWrites = useRef(new Set<string>());
@@ -110,6 +115,14 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     return () => clearTimeout(metaTimer.current);
   }, [loadMeta]);
 
+  const loadSprints = useCallback(async () => {
+    const r = await listSprintsAction(org.id, project.id);
+    if (r.ok) setSprints(r.sprints);
+  }, [org.id, project.id]);
+  useEffect(() => {
+    void loadSprints();
+  }, [loadSprints]);
+
   /** Keep the view in the URL (shareable, survives refresh) without a navigation. */
   const setView = (v: ViewId) => {
     setViewState(v);
@@ -128,7 +141,8 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     const res = await getBoardSnapshotAction(org.id, project.id);
     if (res.ok) dispatch({ type: "reset", tasks: res.tasks });
     loadMeta();
-  }, [org.id, project.id, loadMeta]);
+    void loadSprints();
+  }, [org.id, project.id, loadMeta, loadSprints]);
 
   /* ----------------------------- realtime ----------------------------- */
   const onEvent = useCallback(
@@ -156,6 +170,9 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           if (openTaskId === e.taskId) setOpenTaskId(null);
           loadMeta(250); // the cascade removed its checklist, tags and dependencies
           return;
+        case "SPRINTS_CHANGED":
+          if (e.projectId === project.id) void loadSprints();
+          return;
         case "TASK_META_CHANGED":
           if (e.projectId !== project.id) return;
           loadMeta(250);
@@ -172,7 +189,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           return;
       }
     },
-    [project.id, me.id, openTaskId, colTitle, refOf, router, loadMeta]
+    [project.id, me.id, openTaskId, colTitle, refOf, router, loadMeta, loadSprints]
   );
 
   const { status, presence, connectionId, sendPresence } = useRealtime({ organizationId: org.id, onEvent, onResync: resync });
@@ -240,6 +257,10 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     if (res.conflict) return handleConflict(task, res.current);
     dispatch({ type: "server", task: res.task });
     if ("dueDate" in patch) toast.success(patch.dueDate ? `${refOf(task)} rescheduled` : `${refOf(task)} unscheduled`, { duration: 1800 });
+    if ("sprintId" in patch) {
+      const s = sprints.find((x) => x.id === patch.sprintId);
+      toast.success(s ? `${refOf(task)} moved to ${s.name}` : `${refOf(task)} moved to the backlog`, { duration: 1800 });
+    }
   }
 
   /* ------------------------------- render ------------------------------- */
@@ -338,7 +359,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
         </nav>
       </header>
 
-      <FilterBar filters={filters} onChange={setFilters} members={members} tags={decor.tags} shown={Object.keys(visible).length} total={all.length} />
+      <FilterBar filters={filters} onChange={setFilters} members={members} tags={decor.tags} sprints={sprints} shown={Object.keys(visible).length} total={all.length} />
 
       {!canEdit && (
         <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-8 py-2.5 text-[15px] text-amber-800">
@@ -349,6 +370,16 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
 
       {view === "board" && <BoardView {...viewProps} projectId={project.id} onMove={commitMove} />}
       {view === "list" && <ListView {...viewProps} />}
+      {view === "sprints" && (
+        <SprintsView
+          {...viewProps}
+          organizationId={org.id}
+          projectId={project.id}
+          sprints={sprints}
+          canManage={can(role, "MANAGE_SPRINTS")}
+          onPatch={commitPatch}
+        />
+      )}
       {view === "calendar" && <CalendarView {...viewProps} onPatch={commitPatch} />}
       {view === "timeline" && <TimelineView {...viewProps} onPatch={commitPatch} />}
       {view === "dashboard" && <DashboardView {...viewProps} organizationId={org.id} projectId={project.id} filtered={visible !== state.tasks} />}
@@ -366,6 +397,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           onMetaChanged={() => loadMeta()}
           onOpenTask={setOpenTaskId}
           onToggleDone={toggleDone}
+          sprints={sprints}
           onClose={() => {
             setOpenTaskId(null);
             setEditing(false);
@@ -393,6 +425,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           ctx={ctx}
           initialColumnId={newTask.columnId}
           initialDueDate={newTask.dueDate}
+          sprints={sprints}
           onClose={() => setNewTask(null)}
           onCreated={(t) => {
             ownWrites.current.add(`${t.id}:${t.version}`);

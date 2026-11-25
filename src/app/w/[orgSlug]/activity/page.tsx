@@ -24,6 +24,20 @@ function describe(action: string, meta: Record<string, unknown>, ref: string | u
     case "INVITE_REVOKED": return `revoked invite for ${meta.email}`;
     case "AI_SUBTASKS_ADDED": return `added ${meta.count} AI-generated subtasks to ${target}`;
     case "ORG_CREATED": return `created the workspace`;
+    case "CHECKLIST_ITEM_ADDED": return `added “${meta.text}” to the checklist of ${target}`;
+    case "CHECKLIST_ITEM_DONE": return `checked off “${meta.text}” on ${target}`;
+    case "CHECKLIST_ITEM_REOPENED": return `unchecked “${meta.text}” on ${target}`;
+    case "CHECKLIST_ITEM_DELETED": return `removed “${meta.text}” from the checklist of ${target}`;
+    case "TAG_CREATED": return `created the tag “${meta.name}”`;
+    case "TAG_ADDED": return `tagged ${target} with “${meta.name}”`;
+    case "TAG_REMOVED": return `removed the tag “${meta.name}” from ${target}`;
+    case "DEPENDENCY_ADDED": return `marked ${target} as blocked by “${meta.blockerTitle ?? "another task"}”`;
+    case "DEPENDENCY_REMOVED": return `removed a blocker from ${target}`;
+    case "SPRINT_CREATED": return `created ${meta.name}`;
+    case "SPRINT_UPDATED": return `updated a sprint`;
+    case "SPRINT_STARTED": return `started ${meta.name} with ${meta.committedPoints} points committed`;
+    case "SPRINT_COMPLETED": return `completed ${meta.name} · ${meta.completedPoints} of ${meta.committedPoints} points done${meta.carriedOver ? `, ${meta.carriedOver} carried over` : ""}`;
+    case "SPRINT_DELETED": return `deleted ${meta.name}`;
     default: return action.toLowerCase().replaceAll("_", " ");
   }
 }

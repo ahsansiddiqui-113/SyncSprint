@@ -4,6 +4,8 @@ Multi-tenant B2B project & Kanban workspace with strict tenant isolation, role-b
 
 > **Try it in 10 seconds:** run the app and click **Launch interactive demo** on `/`. You get a private "Acme Engineering" workspace with seeded teammates in every role. Use **Demo · act as role** in the sidebar to test RBAC, open a second tab to watch real-time sync, or click **Simulate teammate** to see live updates and conflict handling on your own.
 
+**Sprints:** backlog and sprint planning with drag-and-drop, sprint start/complete with carry-over, burndown, burnup and velocity charts, and Epic / Story / Task / Bug work item types.
+
 **Work breakdown:** subtasks with progress roll-up, checklists, color-coded tags, and blocked-by / blocking dependencies (with arrows on the Timeline).
 
 **Views** (ClickUp-style, all sharing one search/filter bar and live updates):
@@ -117,7 +119,7 @@ Drag → the reducer moves the card immediately → the server action runs. On `
 
 ---
 
-## Tests (`src/tests`, 70 tests)
+## Tests (`src/tests`, 80 tests)
 
 Each file gets a fresh in-memory PGlite Postgres, migrated from the real SQL migrations.
 
@@ -125,6 +127,7 @@ Each file gets a fresh in-memory PGlite Postgres, migrated from the real SQL mig
 - **RBAC:** viewers can't create, move, edit, delete, comment or use AI; members can't change roles, invite or create projects; admins can't grant ownership; the last-owner invariant holds; invites are email-bound and single-use.
 - **Concurrency:** a stale version gets `VERSION_CONFLICT` with no side effects; of two simultaneous writers exactly one wins; edits record before/after values; conflict explanations come from audit facts.
 - **Fractional indexing:** a move updates only one row, rebalancing triggers and keeps order, and task numbers stay sequential under concurrency.
+- **Sprints:** admin-only lifecycle, default naming and dates, start-early moves dates to today, one active sprint per project (service check + partial unique index), snapshots updated by moves, point edits, sprint changes and deletes, report series with ideal line, completion with carry-over, velocity, frozen completed sprints, tenant/project isolation, work item type validation, demo seed.
 - **Work breakdown:** subtasks are one level deep, same project and tenant, and cascade on delete; checklist roll-up and permissions; tags are per-tenant and case-insensitive; dependency cycles, duplicates, cross-tenant links and self-links (also blocked by a database CHECK) are rejected; the demo seed produces consistent data.
 - **Planning:** start/due/points validation (incl. impossible dates and partial edits checked against the stored row), reschedule under OCC, viewer can't reschedule, dashboard series counts + tenant isolation, UTC date maths, filters.
 - **Units:** midpoint maths, prompt-injection fencing, AI fallback, keyword triage, and the client reducer ignoring stale packets.

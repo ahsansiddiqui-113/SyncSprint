@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { PRIORITY_STYLE, PriorityFlag, StatusPill } from "@/components/ui/badge";
 import { groupByColumn } from "../board-state";
-import { BreakdownBadges, DueChip, ParentRef, PointsBadge } from "../task-meta";
+import { BreakdownBadges, DueChip, ParentRef, PointsBadge, TypeIcon } from "../task-meta";
 import type { TaskDecor } from "../decor";
 import type { Column, Member } from "../kanban-board";
 import type { ViewProps } from "./types";
@@ -277,6 +277,7 @@ export function CardBody({
       )}
     >
       <div className="flex items-center gap-2 text-[13px] text-subtle">
+        <TypeIcon type={task.type} size={16} />
         <span className="font-medium">{refLabel}</span>
         {task.description && <AlignLeft className="h-3.5 w-3.5" />}
         {someone && (

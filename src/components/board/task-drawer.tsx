@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { CalendarDays, Clock, Columns3, Hash, Tag as TagIcon, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
+import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, Tag as TagIcon, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
 import type { TaskPriority } from "@/db/schema";
 import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -17,6 +17,8 @@ import { Section, Sheet } from "./sheet";
 import { aiSourceLabel } from "@/lib/ai-label";
 import { ChecklistSection, DependenciesSection, ParentLink, SubtasksSection, TagsField } from "./drawer-breakdown";
 import type { TaskDecor } from "./decor";
+import type { SprintDTO } from "@/server/services/sprints";
+import { TYPE_META, TypeIcon, WORK_ITEM_TYPES } from "./task-meta";
 import type { BoardCtx } from "./kanban-board";
 
 type Comment = { id: string; body: string; createdAt: string; authorName: string | null; authorId: string | null };
@@ -30,6 +32,8 @@ function draftFrom(t: TaskDTO) {
     startDate: t.startDate ?? "",
     dueDate: t.dueDate ?? "",
     storyPoints: t.storyPoints === null ? "" : String(t.storyPoints),
+    type: t.type,
+    sprintId: t.sprintId ?? "",
   };
 }
 
@@ -52,6 +56,7 @@ export function TaskDrawer(props: {
   onMetaChanged: () => void;
   onOpenTask: (id: string) => void;
   onToggleDone: (t: TaskDTO) => void;
+  sprints: SprintDTO[];
 }) {
   const { ctx, task } = props;
   const canEdit = can(ctx.role, "CREATE_OR_MOVE_TASK");
@@ -71,7 +76,9 @@ export function TaskDrawer(props: {
     draft.assigneeId !== (base.assigneeId ?? "") ||
     draft.startDate !== (base.startDate ?? "") ||
     draft.dueDate !== (base.dueDate ?? "") ||
-    draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints));
+    draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints)) ||
+    draft.type !== base.type ||
+    draft.sprintId !== (base.sprintId ?? "");
   const datesInvalid = !!draft.startDate && !!draft.dueDate && draft.startDate > draft.dueDate;
   const remoteChanged = task.version > base.version;
 
@@ -99,6 +106,8 @@ export function TaskDrawer(props: {
       if (draft.startDate !== (base.startDate ?? "")) patch.startDate = draft.startDate || null;
       if (draft.dueDate !== (base.dueDate ?? "")) patch.dueDate = draft.dueDate || null;
       if (draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints))) patch.storyPoints = draft.storyPoints === "" ? null : Number(draft.storyPoints);
+      if (draft.type !== base.type) patch.type = draft.type;
+      if (draft.sprintId !== (base.sprintId ?? "")) patch.sprintId = draft.sprintId || null;
       const res = await updateTaskAction({ organizationId: ctx.org.id, taskId: task.id, expectedVersion: base.version, patch });
       if (!res.ok) return void toast.error(res.message);
       if (res.conflict) {
@@ -214,6 +223,40 @@ export function TaskDrawer(props: {
         />
 
         <div className="mt-4 grid grid-cols-[110px_1fr] items-center gap-x-3 gap-y-2.5 rounded-xl border border-border bg-surface-2 p-3.5 text-sm">
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Shapes className="h-3.5 w-3.5" /> Type</span>
+          <div className="flex flex-wrap gap-1">
+            {WORK_ITEM_TYPES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setDraft({ ...draft, type: t })}
+                className={cn(
+                  "flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[14px] transition-colors disabled:cursor-default",
+                  draft.type === t ? "border-primary/40 bg-primary-soft text-foreground" : "border-transparent text-subtle hover:bg-hover hover:text-foreground"
+                )}
+              >
+                <TypeIcon type={t} size={16} /> {TYPE_META[t].label}
+              </button>
+            ))}
+          </div>
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Rocket className="h-3.5 w-3.5" /> Sprint</span>
+          <Select
+            aria-label="Sprint"
+            className="h-8 max-w-60 border-transparent bg-transparent px-1.5 hover:border-border-strong"
+            value={draft.sprintId}
+            onChange={(e) => setDraft({ ...draft, sprintId: e.target.value })}
+          >
+            <option value="">Backlog</option>
+            {props.sprints
+              .filter((s) => s.status !== "completed" || s.id === base.sprintId)
+              .map((s) => (
+                <option key={s.id} value={s.id} disabled={s.status === "completed"}>
+                  {s.name}{s.status === "active" ? " (active)" : s.status === "completed" ? " (completed)" : ""}
+                </option>
+              ))}
+          </Select>
+
           <span className="flex items-center gap-2 text-[15px] text-subtle"><Columns3 className="h-3.5 w-3.5" /> Status</span>
           <span className="text-[15px] font-medium">{column?.title}</span>
 

@@ -11,6 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Sheet } from "./sheet";
 import { PRIORITY_STYLE } from "@/components/ui/badge";
+import type { WorkItemType } from "@/db/schema";
+import type { SprintDTO } from "@/server/services/sprints";
+import { TYPE_META, WORK_ITEM_TYPES } from "./task-meta";
 import { aiSourceLabel } from "@/lib/ai-label";
 import type { BoardCtx } from "./kanban-board";
 
@@ -18,12 +21,14 @@ export function NewTaskDialog({
   ctx,
   initialColumnId,
   initialDueDate,
+  sprints,
   onClose,
   onCreated,
 }: {
   ctx: BoardCtx;
   initialColumnId?: string;
   initialDueDate?: string;
+  sprints: SprintDTO[];
   onClose: () => void;
   onCreated: (t: TaskDTO) => void;
 }) {
@@ -34,6 +39,8 @@ export function NewTaskDialog({
   const [assigneeId, setAssigneeId] = useState("");
   const [dueDate, setDueDate] = useState(initialDueDate ?? "");
   const [points, setPoints] = useState("");
+  const [type, setType] = useState<WorkItemType>("task");
+  const [sprintId, setSprintId] = useState("");
   const [triage, setTriage] = useState<{ rationale: string; provider: string; labels: string[] } | null>(null);
   const [pending, start] = useTransition();
   const [aiPending, startAi] = useTransition();
@@ -54,6 +61,8 @@ export function NewTaskDialog({
               assigneeId: assigneeId || null,
               dueDate: dueDate || null,
               storyPoints: points === "" ? null : Number(points),
+              type,
+              sprintId: sprintId || null,
             });
             if (!r.ok) return void toast.error(r.message);
             onCreated(r.task);
@@ -119,6 +128,23 @@ export function NewTaskDialog({
             <Select id="n-asg" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
               <option value="">Unassigned</option>
               {ctx.members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </Select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="n-type">Type</Label>
+            <Select id="n-type" value={type} onChange={(e) => setType(e.target.value as WorkItemType)}>
+              {WORK_ITEM_TYPES.map((t) => <option key={t} value={t}>{TYPE_META[t].label}</option>)}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="n-sprint">Sprint</Label>
+            <Select id="n-sprint" value={sprintId} onChange={(e) => setSprintId(e.target.value)}>
+              <option value="">Backlog</option>
+              {sprints.filter((s) => s.status !== "completed").map((s) => (
+                <option key={s.id} value={s.id}>{s.name}{s.status === "active" ? " (active)" : ""}</option>
+              ))}
             </Select>
           </div>
         </div>

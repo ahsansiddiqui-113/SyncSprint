@@ -33,12 +33,14 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
 - ✅ **Dependency arrows** on the Timeline (red when the blocked task starts before its blocker ends)
 - ↪ Multiple assignees and watchers moved to Phase 4 (they change the core task model)
 
-## Phase 3 — Sprints & Agile (Azure Boards style)
-- ⬜ **Sprints / iterations** with start–end dates and capacity
-- ⬜ Backlog → sprint planning view
-- ⬜ **Burndown / burnup** charts (daily snapshots)
-- ⬜ Velocity chart across sprints
-- ⬜ Work item types: Epic → Feature → Story → Task/Bug
+## Phase 3 — Sprints & Agile (Azure Boards style) ✅
+- ✅ **Sprints** with goal and dates; planned → active → completed; one active sprint per project (also enforced by a partial unique index)
+- ✅ **Sprints view**: drag tasks between backlog and sprints; start early (moves dates to today); complete with carry-over to backlog or the next sprint
+- ✅ **Daily snapshots** recorded in the same transaction as every task change
+- ✅ **Burndown** (remaining vs ideal) and **burnup** (scope vs completed), with table view
+- ✅ **Velocity** (committed vs completed per sprint)
+- ✅ **Work item types**: Epic, Story, Task, Bug (icons, picker, filter). Hierarchy uses subtasks (one level); a deeper Epic → Feature → Story tree is a later step
+- ⬜ Sprint capacity per person (moved to Phase 6 with the Workload view)
 
 ## Phase 4 — Customization
 - ⬜ Custom statuses per project (add/rename/reorder/color columns)

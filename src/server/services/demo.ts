@@ -3,6 +3,8 @@ import { and, asc, eq, ne } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   auditLogs,
+  sprints,
+  sprintSnapshots,
   checklistItems,
   tags,
   taskDependencies,
@@ -161,7 +163,81 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
           })),
       ]);
 
-      if (p.key === "ENG") await seedBreakdown(created, project!.id, cols);
+      if (p.key === "ENG") {
+        await seedBreakdown(created, project!.id, cols);
+        await seedSprints(project!.id, cols);
+      }
+    }
+
+    /**
+     * Phase 3 sample data: work item types, two completed sprints (velocity), an
+     * active sprint with a week of daily snapshots (burndown/burnup, including a
+     * mid-sprint scope increase) and a planned next sprint.
+     */
+    async function seedSprints(projectId: string, cols: (typeof boardColumns.$inferSelect)[]) {
+      const all = await tx.select().from(tasks).where(eq(tasks.projectId, projectId));
+      const byNumber = (n: number) => all.find((t) => t.taskNumber === n);
+      const TYPES: Record<number, "epic" | "story" | "task" | "bug"> = {
+        1: "epic", 2: "story", 3: "task", 4: "story", 5: "bug", 6: "epic", 7: "story", 8: "story", 9: "bug", 10: "task", 11: "task", 12: "story",
+      };
+      for (const [n, type] of Object.entries(TYPES)) {
+        const t = byNumber(Number(n));
+        if (t) await tx.update(tasks).set({ type }).where(eq(tasks.id, t.id));
+      }
+
+      const doneCol = cols[cols.length - 1]!.id;
+      const [s1, s2, s3, s4] = await tx
+        .insert(sprints)
+        .values([
+          { organizationId: orgId, projectId, name: "Sprint 1", goal: "Ship workspace onboarding", startDate: day(-42), endDate: day(-29), status: "completed", committedPoints: 21, completedPoints: 18, startedAt: minutesAgo(60 * 24 * 42), completedAt: minutesAgo(60 * 24 * 29) },
+          { organizationId: orgId, projectId, name: "Sprint 2", goal: "Roles, invites and the activity log", startDate: day(-28), endDate: day(-15), status: "completed", committedPoints: 24, completedPoints: 22, startedAt: minutesAgo(60 * 24 * 28), completedAt: minutesAgo(60 * 24 * 15) },
+          { organizationId: orgId, projectId, name: "Sprint 3", goal: "Faster boards and enterprise sign-in", startDate: day(-6), endDate: day(7), status: "active", startedAt: minutesAgo(60 * 24 * 6) },
+          { organizationId: orgId, projectId, name: "Sprint 4", goal: "Billing and API hardening", startDate: day(8), endDate: day(21), status: "planned" },
+        ])
+        .returning();
+
+      // Active sprint: everything past Backlog plus the billing subtasks. Planned: two backlog stories.
+      const activeTasks = all.filter((t) => t.columnId !== cols[0]!.id || t.parentId);
+      for (const t of activeTasks) await tx.update(tasks).set({ sprintId: s3!.id }).where(eq(tasks.id, t.id));
+      for (const n of [2, 4]) {
+        const t = byNumber(n);
+        if (t) await tx.update(tasks).set({ sprintId: s4!.id }).where(eq(tasks.id, t.id));
+      }
+
+      const scopeNow = activeTasks.reduce((sum, t) => sum + (t.storyPoints ?? 0), 0);
+      const doneNow = activeTasks.filter((t) => t.columnId === doneCol).reduce((sum, t) => sum + (t.storyPoints ?? 0), 0);
+      const tasksNow = activeTasks.length;
+      const doneTasksNow = activeTasks.filter((t) => t.columnId === doneCol).length;
+      const creep = 3; // a 3-pointer joined on day 3
+      await tx.update(sprints).set({ committedPoints: scopeNow - creep }).where(eq(sprints.id, s3!.id));
+
+      const progress = [0, 0.15, 0.3, 0.35, 0.55, 0.8, 1]; // uneven, like real teams
+      await tx.insert(sprintSnapshots).values(
+        progress.map((f, i) => ({
+          organizationId: orgId,
+          sprintId: s3!.id,
+          day: day(i - 6),
+          scopePoints: i >= 3 ? scopeNow : scopeNow - creep,
+          completedPoints: Math.round(doneNow * f),
+          scopeTasks: i >= 3 ? tasksNow : tasksNow - 1,
+          completedTasks: Math.round(doneTasksNow * f),
+        }))
+      );
+      // Historical sprints: start + end snapshots so their burndown has a shape.
+      for (const [sp, committed, completed, start, end] of [
+        [s1!, 21, 18, -42, -29],
+        [s2!, 24, 22, -28, -15],
+      ] as const) {
+        await tx.insert(sprintSnapshots).values([
+          { organizationId: orgId, sprintId: sp.id, day: day(start), scopePoints: committed, completedPoints: 0, scopeTasks: 8, completedTasks: 0 },
+          { organizationId: orgId, sprintId: sp.id, day: day(start + 7), scopePoints: committed, completedPoints: Math.round(completed * 0.45), scopeTasks: 8, completedTasks: 3 },
+          { organizationId: orgId, sprintId: sp.id, day: day(end), scopePoints: committed, completedPoints: completed, scopeTasks: 8, completedTasks: 7 },
+        ]);
+      }
+      await tx.insert(auditLogs).values([
+        { organizationId: orgId, actorId: mates[0]!.id, action: "SPRINT_COMPLETED", entityType: "sprint", entityId: s2!.id, metadata: { name: "Sprint 2", committedPoints: 24, completedPoints: 22, carriedOver: 1 }, createdAt: minutesAgo(60 * 24 * 15) },
+        { organizationId: orgId, actorId: mates[0]!.id, action: "SPRINT_STARTED", entityType: "sprint", entityId: s3!.id, metadata: { name: "Sprint 3", committedPoints: scopeNow - creep }, createdAt: minutesAgo(60 * 24 * 6) },
+      ]);
     }
 
     /** Phase 2 sample data: tags, a checklist, subtasks and dependencies on the ENG board. */

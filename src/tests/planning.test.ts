@@ -118,7 +118,7 @@ describe("filters", () => {
   const mk = (id: string, over: Partial<TaskDTO>): TaskDTO => ({
     id, organizationId: "o", projectId: "p", columnId: "todo", taskNumber: 1, title: id, description: null,
     priority: "medium", assigneeId: null, position: 1, version: 1, updatedAt: "", createdAt: "",
-    startDate: null, dueDate: null, storyPoints: null, parentId: null, ...over,
+    startDate: null, dueDate: null, storyPoints: null, parentId: null, type: "task", sprintId: null, ...over,
   });
   const tasks = {
     a: mk("a", { title: "Fix login bug", assigneeId: "me", priority: "urgent" }),

@@ -21,6 +21,9 @@ import { sql } from "drizzle-orm";
 export const orgRoleEnum = pgEnum("org_role", ["owner", "admin", "member", "viewer"]);
 export const taskPriorityEnum = pgEnum("task_priority", ["low", "medium", "high", "urgent"]);
 export const inviteStatusEnum = pgEnum("invite_status", ["pending", "accepted", "revoked"]);
+export const sprintStatusEnum = pgEnum("sprint_status", ["planned", "active", "completed"]);
+/** Work item types (Azure Boards / Jira style). Hierarchy uses parentId (one level). */
+export const workItemTypeEnum = pgEnum("work_item_type", ["epic", "story", "task", "bug"]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -209,6 +212,9 @@ export const tasks = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     // Subtasks: one level deep (a subtask cannot have subtasks), same project as the parent.
     parentId: uuid("parent_id").references((): AnyPgColumn => tasks.id, { onDelete: "cascade" }),
+    type: workItemTypeEnum("type").default("task").notNull(),
+    // Removing a sprint sends its tasks back to the backlog.
+    sprintId: uuid("sprint_id").references((): AnyPgColumn => sprints.id, { onDelete: "set null" }),
     columnId: uuid("column_id")
       .notNull()
       .references(() => boardColumns.id, { onDelete: "cascade" }),
@@ -232,7 +238,58 @@ export const tasks = pgTable(
     uniqueIndex("tasks_project_number_idx").on(t.projectId, t.taskNumber),
     index("tasks_org_due_idx").on(t.organizationId, t.dueDate),
     index("tasks_parent_idx").on(t.parentId),
+    index("tasks_sprint_idx").on(t.sprintId),
   ]
+);
+
+// 7a. Sprints (iterations) and their daily snapshots (burndown / burnup / velocity)
+export const sprints = pgTable(
+  "sprints",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 80 }).notNull(),
+    goal: text("goal"),
+    startDate: date("start_date", { mode: "string" }),
+    endDate: date("end_date", { mode: "string" }),
+    status: sprintStatusEnum("status").default("planned").notNull(),
+    /** Points in the sprint when it started (the commitment). */
+    committedPoints: integer("committed_points"),
+    /** Points done when it was completed. */
+    completedPoints: integer("completed_points"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    index("sprints_project_idx").on(t.organizationId, t.projectId, t.status),
+    // At most one active sprint per project, enforced by the database.
+    uniqueIndex("sprints_one_active_idx").on(t.projectId).where(sql`${t.status} = 'active'`),
+    check("sprints_dates_order", sql`${t.startDate} is null or ${t.endDate} is null or ${t.startDate} <= ${t.endDate}`),
+  ]
+);
+
+export const sprintSnapshots = pgTable(
+  "sprint_snapshots",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sprintId: uuid("sprint_id")
+      .notNull()
+      .references(() => sprints.id, { onDelete: "cascade" }),
+    day: date("day", { mode: "string" }).notNull(),
+    scopePoints: integer("scope_points").notNull(),
+    completedPoints: integer("completed_points").notNull(),
+    scopeTasks: integer("scope_tasks").notNull(),
+    completedTasks: integer("completed_tasks").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.sprintId, t.day] })]
 );
 
 // 7b. Checklist items (lightweight to-dos inside a task; not tasks themselves)
@@ -370,3 +427,6 @@ export type OrgRole = (typeof orgRoleEnum.enumValues)[number];
 export type TaskPriority = (typeof taskPriorityEnum.enumValues)[number];
 export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
+export type Sprint = typeof sprints.$inferSelect;
+export type SprintStatus = (typeof sprintStatusEnum.enumValues)[number];
+export type WorkItemType = (typeof workItemTypeEnum.enumValues)[number];
