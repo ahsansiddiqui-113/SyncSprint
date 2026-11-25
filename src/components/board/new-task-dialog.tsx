@@ -12,12 +12,26 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Sheet } from "./sheet";
 import type { BoardCtx } from "./kanban-board";
 
-export function NewTaskDialog({ ctx, initialColumnId, onClose, onCreated }: { ctx: BoardCtx; initialColumnId?: string; onClose: () => void; onCreated: (t: TaskDTO) => void }) {
+export function NewTaskDialog({
+  ctx,
+  initialColumnId,
+  initialDueDate,
+  onClose,
+  onCreated,
+}: {
+  ctx: BoardCtx;
+  initialColumnId?: string;
+  initialDueDate?: string;
+  onClose: () => void;
+  onCreated: (t: TaskDTO) => void;
+}) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [columnId, setColumnId] = useState(initialColumnId ?? ctx.columns[0]?.id ?? "");
   const [assigneeId, setAssigneeId] = useState("");
+  const [dueDate, setDueDate] = useState(initialDueDate ?? "");
+  const [points, setPoints] = useState("");
   const [triage, setTriage] = useState<{ rationale: string; provider: string; labels: string[] } | null>(null);
   const [pending, start] = useTransition();
   const [aiPending, startAi] = useTransition();
@@ -29,7 +43,16 @@ export function NewTaskDialog({ ctx, initialColumnId, onClose, onCreated }: { ct
         onSubmit={(e) => {
           e.preventDefault();
           start(async () => {
-            const r = await createTaskAction({ organizationId: ctx.org.id, columnId, title, description: description || null, priority, assigneeId: assigneeId || null });
+            const r = await createTaskAction({
+              organizationId: ctx.org.id,
+              columnId,
+              title,
+              description: description || null,
+              priority,
+              assigneeId: assigneeId || null,
+              dueDate: dueDate || null,
+              storyPoints: points === "" ? null : Number(points),
+            });
             if (!r.ok) return void toast.error(r.message);
             onCreated(r.task);
             toast.success(`Created ${ctx.project.key}-${r.task.taskNumber}`);
@@ -94,6 +117,19 @@ export function NewTaskDialog({ ctx, initialColumnId, onClose, onCreated }: { ct
             <Select id="n-asg" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
               <option value="">Unassigned</option>
               {ctx.members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </Select>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="col-span-2 space-y-1">
+            <Label htmlFor="n-due">Due date</Label>
+            <Input id="n-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="n-pts">Story points</Label>
+            <Select id="n-pts" value={points} onChange={(e) => setPoints(e.target.value)}>
+              <option value="">—</option>
+              {[1, 2, 3, 5, 8, 13].map((n) => <option key={n} value={n}>{n}</option>)}
             </Select>
           </div>
         </div>

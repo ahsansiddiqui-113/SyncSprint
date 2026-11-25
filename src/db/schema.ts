@@ -214,6 +214,10 @@ export const tasks = pgTable(
     assigneeId: uuid("assignee_id").references(() => users.id, { onDelete: "set null" }),
     position: doublePrecision("position").notNull(),
     version: integer("version").default(1).notNull(),
+    // Planning fields (date-only, "YYYY-MM-DD": no timezone drift between clients).
+    startDate: date("start_date", { mode: "string" }),
+    dueDate: date("due_date", { mode: "string" }),
+    storyPoints: integer("story_points"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     ...timestamps,
   },
@@ -221,6 +225,7 @@ export const tasks = pgTable(
     index("tasks_org_project_idx").on(t.organizationId, t.projectId),
     index("tasks_column_pos_idx").on(t.columnId, t.position),
     uniqueIndex("tasks_project_number_idx").on(t.projectId, t.taskNumber),
+    index("tasks_org_due_idx").on(t.organizationId, t.dueDate),
   ]
 );
 

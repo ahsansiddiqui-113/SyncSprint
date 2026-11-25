@@ -19,15 +19,15 @@ const FEATURES = [
 
 type PreviewCard = { ref: string; title: string; p: TaskPriority; who?: string; live?: string };
 const PREVIEW: { title: string; color: string; cards: PreviewCard[] }[] = [
-  { title: "Backlog", color: "#87909e", cards: [
+  { title: "Backlog", color: "#3f7cb8", cards: [
     { ref: "ENG-1", title: "Multi-tenant billing webhook", p: "high", who: "AR" },
     { ref: "ENG-3", title: "Migrate session store", p: "low" },
   ] },
-  { title: "In Progress", color: "#7b68ee", cards: [
+  { title: "In Progress", color: "#8a5cf6", cards: [
     { ref: "ENG-5", title: "Fix N+1 on project list", p: "urgent", who: "SC", live: "Sara editing…" },
     { ref: "ENG-6", title: "SAML SSO for enterprise", p: "high", who: "AR" },
   ] },
-  { title: "Review", color: "#ff9800", cards: [{ ref: "ENG-8", title: "Row-level security policies", p: "high", who: "SC" }] },
+  { title: "Review", color: "#dd6b00", cards: [{ ref: "ENG-8", title: "Row-level security policies", p: "high", who: "SC" }] },
   { title: "Done", color: DONE_COLOR, cards: [{ ref: "ENG-12", title: "Fractional indexing", p: "medium", who: "PP" }] },
 ];
 

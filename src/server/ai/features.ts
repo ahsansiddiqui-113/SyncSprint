@@ -97,7 +97,8 @@ export async function createSubtasks(
         columnId: backlog!.id,
         title: s.title,
         priority: s.priority,
-        description: `Subtask of ${key}-${parent.taskNumber} · ${s.estimatedPoints} pts`,
+        description: `Subtask of ${key}-${parent.taskNumber}`,
+        storyPoints: s.estimatedPoints,
       })
     );
   }

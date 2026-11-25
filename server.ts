@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { createServer } from "node:http";
 import next from "next";
-import { db } from "@/db";
+import { closeDb, db } from "@/db";
 import { runMigrations } from "@/db/migrate";
 import { createWsUpgradeHandler } from "@/server/ws-server";
 
@@ -23,6 +23,24 @@ async function main() {
     if (req.url?.startsWith("/ws")) return void wsUpgrade(req, socket, head);
     return nextUpgrade(req, socket, head); // Next.js HMR in dev
   });
+
+  // Graceful shutdown: stop accepting work, then close the DB (PGlite needs a final checkpoint).
+  let stopping = false;
+  const shutdown = (signal: string) => {
+    if (stopping) return;
+    stopping = true;
+    console.log(`
+${signal} received — shutting down…`);
+    const force = setTimeout(() => process.exit(1), 8_000);
+    force.unref();
+    server.close();
+    void app
+      .close()
+      .catch(() => {})
+      .then(() => closeDb())
+      .finally(() => process.exit(0));
+  };
+  for (const sig of ["SIGINT", "SIGTERM", "SIGBREAK", "SIGHUP"] as const) process.on(sig, () => shutdown(sig));
 
   server.listen(port, () => {
     console.log(`▲ SyncSprint ready on ${appUrl} (${dev ? "dev" : "prod"}) — WebSocket at /ws`);

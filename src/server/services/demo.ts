@@ -80,6 +80,15 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
 
     const assignable = [mates[0]!.id, mates[1]!.id, mates[2]!.id];
     const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const POINTS = [1, 2, 3, 5, 8, 3, 5, 2];
+    /** Believable schedule per status: backlog in the future, done in the past, one item overdue. */
+    const schedule = (column: number, i: number): { startDate: string | null; dueDate: string | null } => {
+      if (column === 0) return i % 3 === 2 ? { startDate: null, dueDate: null } : { startDate: day(3 + i), dueDate: day(7 + i * 2) };
+      if (column === 1) return { startDate: day(-4 - (i % 3)), dueDate: day((i % 3) - 1) };
+      if (column === 2) return { startDate: day(-6), dueDate: day(1 + (i % 2)) };
+      return { startDate: day(-14 + i), dueDate: day(-5 + (i % 3)) };
+    };
 
     for (const [p, seedTasks] of [
       [{ name: "Platform Engineering", key: "ENG", description: "Core product & multi-tenant platform" }, ENG_TASKS],
@@ -111,27 +120,42 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
               priority: t.priority,
               assigneeId: t.assignee !== undefined ? assignable[t.assignee]! : null,
               position: n * POSITION_STEP,
-              createdAt: minutesAgo(60 * 24 * 3 - i * 30),
-              updatedAt: minutesAgo(60 * 24 - i * 20),
+              ...schedule(t.column, i),
+              storyPoints: POINTS[i % POINTS.length]!,
+              // Spread creation across the last ~2 weeks (oldest first) for the dashboard.
+              createdAt: minutesAgo(60 * 24 * (13 - i) + 90),
+              updatedAt: minutesAgo(60 * 24 * Math.max(0, Math.round((13 - i) * 0.6)) + 45),
             };
           })
         )
         .returning();
 
-      // Some believable history for the activity feed + AI digest.
-      await tx.insert(auditLogs).values(
-        created
-          .filter((_, i) => seedTasks[i]!.column > 0)
-          .map((t, i) => ({
+      // Believable history for the activity feed, dashboard and AI digest:
+      // every task gets a TASK_CREATED at its creation time, and tasks past
+      // Backlog get a TASK_MOVED into their column a few days later.
+      await tx.insert(auditLogs).values([
+        ...created.map((t, i) => ({
+          organizationId: orgId,
+          actorId: t.assigneeId ?? mates[0]!.id,
+          action: "TASK_CREATED",
+          entityType: "task",
+          entityId: t.id,
+          metadata: { ref: `${p.key}-${t.taskNumber}`, title: t.title, columnId: cols[0]!.id },
+          createdAt: t.createdAt,
+        })),
+        ...created
+          .map((t, i) => ({ t, i }))
+          .filter(({ i }) => seedTasks[i]!.column > 0)
+          .map(({ t, i }) => ({
             organizationId: orgId,
             actorId: t.assigneeId ?? mates[0]!.id,
             action: "TASK_MOVED",
             entityType: "task",
             entityId: t.id,
             metadata: { targetColumnId: t.columnId, newPosition: t.position, version: 1 },
-            createdAt: minutesAgo(240 - i * 15),
-          }))
-      );
+            createdAt: minutesAgo(60 * 24 * Math.max(0, Math.round((13 - i) * 0.6)) + 45),
+          })),
+      ]);
     }
 
     await tx.insert(auditLogs).values({

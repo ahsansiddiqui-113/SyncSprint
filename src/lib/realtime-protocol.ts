@@ -13,6 +13,9 @@ export type TaskDTO = {
   assigneeId: string | null;
   position: number;
   version: number;
+  startDate: string | null;
+  dueDate: string | null;
+  storyPoints: number | null;
   updatedAt: string;
   createdAt: string;
 };

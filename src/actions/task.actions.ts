@@ -95,3 +95,11 @@ export async function getBoardSnapshotAction(organizationId: string, projectId: 
     return { tasks: rows.map(toTaskDTO) };
   });
 }
+
+export async function projectFlowSeriesAction(organizationId: string, projectId: string, days: number) {
+  return toResult(async () => {
+    const actor = await requireActor();
+    const { projectFlowSeries } = await import("@/server/services/workspace");
+    return { series: await projectFlowSeries(db, actor.id, organizationId, projectId, days) };
+  });
+}

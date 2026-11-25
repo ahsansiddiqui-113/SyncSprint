@@ -17,6 +17,20 @@ import { requireOrgPermission } from "@/lib/rbac";
 
 export const prioritySchema = z.enum(["low", "medium", "high", "urgent"]);
 
+/** Calendar date "YYYY-MM-DD" (date-only; validated as a real date). */
+export const dateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
+  .refine((d) => {
+    const t = new Date(`${d}T00:00:00Z`);
+    return !Number.isNaN(t.getTime()) && t.toISOString().startsWith(d);
+  }, "Invalid date");
+export const pointsSchema = z.number().int().min(0).max(100);
+
+function assertDateOrder(start: string | null | undefined, due: string | null | undefined) {
+  if (start && due && start > due) throw new AppError("VALIDATION", "Start date must be on or before the due date");
+}
+
 /* ------------------------------- helpers -------------------------------- */
 
 async function assertColumnInOrg(conn: DbOrTx, organizationId: string, columnId: string) {
@@ -84,11 +98,15 @@ export const createTaskInput = z.object({
   description: z.string().max(10_000).nullish(),
   priority: prioritySchema.default("medium"),
   assigneeId: z.string().uuid().nullish(),
+  startDate: dateSchema.nullish(),
+  dueDate: dateSchema.nullish(),
+  storyPoints: pointsSchema.nullish(),
 });
 
 export async function createTask(conn: DB, actorId: string, raw: z.input<typeof createTaskInput>) {
   const input = createTaskInput.parse(raw);
   await requireOrgPermission(actorId, input.organizationId, "member", conn);
+  assertDateOrder(input.startDate, input.dueDate);
 
   return conn.transaction(async (tx) => {
     const col = await assertColumnInOrg(tx, input.organizationId, input.columnId);
@@ -120,6 +138,9 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
         description: input.description ?? null,
         priority: input.priority,
         assigneeId: input.assigneeId ?? null,
+        startDate: input.startDate ?? null,
+        dueDate: input.dueDate ?? null,
+        storyPoints: input.storyPoints ?? null,
         position: (last?.position ?? 0) + POSITION_STEP,
       })
       .returning();
@@ -232,6 +253,9 @@ export const updateTaskInput = z.object({
       description: z.string().max(10_000).nullable(),
       priority: prioritySchema,
       assigneeId: z.string().uuid().nullable(),
+      startDate: dateSchema.nullable(),
+      dueDate: dateSchema.nullable(),
+      storyPoints: pointsSchema.nullable(),
     })
     .partial(),
 });
@@ -251,6 +275,11 @@ export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof 
       .where(and(eq(tasks.id, input.taskId), eq(tasks.organizationId, input.organizationId)))
       .limit(1);
     if (!before) throw new AppError("NOT_FOUND", "Task not found");
+    // Validate the merged result, so editing only the due date can't put it before an existing start.
+    assertDateOrder(
+      input.patch.startDate !== undefined ? input.patch.startDate : before.startDate,
+      input.patch.dueDate !== undefined ? input.patch.dueDate : before.dueDate
+    );
 
     const [updated] = await tx
       .update(tasks)

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Clock, Columns3, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
+import { CalendarDays, Clock, Columns3, Hash, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
 import type { TaskPriority } from "@/db/schema";
 import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -17,6 +17,19 @@ import { Section, Sheet } from "./sheet";
 import type { BoardCtx } from "./kanban-board";
 
 type Comment = { id: string; body: string; createdAt: string; authorName: string | null; authorId: string | null };
+/** Editable form state; empty string = "no value" for optional fields. */
+function draftFrom(t: TaskDTO) {
+  return {
+    title: t.title,
+    description: t.description ?? "",
+    priority: t.priority,
+    assigneeId: t.assigneeId ?? "",
+    startDate: t.startDate ?? "",
+    dueDate: t.dueDate ?? "",
+    storyPoints: t.storyPoints === null ? "" : String(t.storyPoints),
+  };
+}
+
 type Subtask = { title: string; priority: TaskPriority; estimatedPoints: number };
 
 export function TaskDrawer(props: {
@@ -35,7 +48,7 @@ export function TaskDrawer(props: {
   const canEdit = can(ctx.role, "CREATE_OR_MOVE_TASK");
   // Edits are made against the version we started from (`base`), not the live one.
   const [base, setBase] = useState(task);
-  const [draft, setDraft] = useState({ title: task.title, description: task.description ?? "", priority: task.priority, assigneeId: task.assigneeId ?? "" });
+  const [draft, setDraft] = useState(draftFrom(task));
   const [pending, start] = useTransition();
   const [comments, setComments] = useState<Comment[]>([]);
   const [comment, setComment] = useState("");
@@ -46,7 +59,11 @@ export function TaskDrawer(props: {
     draft.title !== base.title ||
     draft.description !== (base.description ?? "") ||
     draft.priority !== base.priority ||
-    draft.assigneeId !== (base.assigneeId ?? "");
+    draft.assigneeId !== (base.assigneeId ?? "") ||
+    draft.startDate !== (base.startDate ?? "") ||
+    draft.dueDate !== (base.dueDate ?? "") ||
+    draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints));
+  const datesInvalid = !!draft.startDate && !!draft.dueDate && draft.startDate > draft.dueDate;
   const remoteChanged = task.version > base.version;
 
   useEffect(() => props.onEditingChange(dirty), [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -55,7 +72,7 @@ export function TaskDrawer(props: {
   useEffect(() => {
     if (!dirty && remoteChanged) {
       setBase(task);
-      setDraft({ title: task.title, description: task.description ?? "", priority: task.priority, assigneeId: task.assigneeId ?? "" });
+      setDraft(draftFrom(task));
     }
   }, [task, dirty, remoteChanged]);
 
@@ -70,6 +87,9 @@ export function TaskDrawer(props: {
       if (draft.description !== (base.description ?? "")) patch.description = draft.description || null;
       if (draft.priority !== base.priority) patch.priority = draft.priority;
       if (draft.assigneeId !== (base.assigneeId ?? "")) patch.assigneeId = draft.assigneeId || null;
+      if (draft.startDate !== (base.startDate ?? "")) patch.startDate = draft.startDate || null;
+      if (draft.dueDate !== (base.dueDate ?? "")) patch.dueDate = draft.dueDate || null;
+      if (draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints))) patch.storyPoints = draft.storyPoints === "" ? null : Number(draft.storyPoints);
       const res = await updateTaskAction({ organizationId: ctx.org.id, taskId: task.id, expectedVersion: base.version, patch });
       if (!res.ok) return void toast.error(res.message);
       if (res.conflict) {
@@ -91,7 +111,7 @@ export function TaskDrawer(props: {
   const column = ctx.columns.find((c) => c.id === task.columnId);
   const reset = () => {
     setBase(task);
-    setDraft({ title: task.title, description: task.description ?? "", priority: task.priority, assigneeId: task.assigneeId ?? "" });
+    setDraft(draftFrom(task));
   };
 
   return (
@@ -132,7 +152,7 @@ export function TaskDrawer(props: {
                 Discard
               </Button>
             )}
-            <Button size="sm" onClick={save} disabled={!dirty || pending}>
+            <Button size="sm" onClick={save} disabled={!dirty || pending || datesInvalid}>
               {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Save changes
             </Button>
           </div>
@@ -202,6 +222,48 @@ export function TaskDrawer(props: {
             <option value="">Unassigned</option>
             {ctx.members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </Select>
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><CalendarDays className="h-3.5 w-3.5" /> Dates</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="date"
+              aria-label="Start date"
+              value={draft.startDate}
+              max={draft.dueDate || undefined}
+              onChange={(e) => setDraft({ ...draft, startDate: e.target.value })}
+              className="h-8 rounded-md border border-border bg-white px-2 text-[14px] outline-none hover:border-border-strong focus:border-primary disabled:bg-transparent"
+            />
+            <span className="text-subtle">→</span>
+            <input
+              type="date"
+              aria-label="Due date"
+              value={draft.dueDate}
+              min={draft.startDate || undefined}
+              onChange={(e) => setDraft({ ...draft, dueDate: e.target.value })}
+              className={cn(
+                "h-8 rounded-md border bg-white px-2 text-[14px] outline-none hover:border-border-strong focus:border-primary disabled:bg-transparent",
+                datesInvalid ? "border-red-300" : "border-border"
+              )}
+            />
+            {datesInvalid && <span className="text-[13px] text-red-600">Start must be on or before due</span>}
+          </div>
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Hash className="h-3.5 w-3.5" /> Points</span>
+          <div className="flex gap-1">
+            {["", "1", "2", "3", "5", "8", "13"].map((n) => (
+              <button
+                key={n || "none"}
+                type="button"
+                onClick={() => setDraft({ ...draft, storyPoints: n })}
+                className={cn(
+                  "h-8 min-w-8 cursor-pointer rounded-md border px-2 text-[13.5px] font-medium transition-colors disabled:cursor-default",
+                  draft.storyPoints === n ? "border-primary/40 bg-primary-soft text-primary" : "border-transparent text-subtle hover:bg-hover hover:text-foreground"
+                )}
+              >
+                {n || "—"}
+              </button>
+            ))}
+          </div>
 
           <span className="flex items-center gap-2 text-[15px] text-subtle"><Clock className="h-3.5 w-3.5" /> Updated</span>
           <span className="text-[15px] text-muted">{timeAgo(task.updatedAt)} · created {timeAgo(task.createdAt)}</span>

@@ -1,0 +1,22 @@
+import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
+import type { Column, Member } from "../kanban-board";
+
+export type TaskPatch = Partial<Pick<TaskDTO, "title" | "description" | "priority" | "assigneeId" | "startDate" | "dueDate" | "storyPoints">>;
+
+/** Props every project view receives. `tasks` is already filtered by the filter bar. */
+export type ViewProps = {
+  tasks: Record<string, TaskDTO>;
+  columns: Column[];
+  colorOf: (columnIndex: number) => string;
+  doneColumnId: string | null;
+  refOf: (t: { taskNumber: number }) => string;
+  memberById: Map<string, Member>;
+  presenceByTask: Map<string, PresenceUser[]>;
+  flash: Record<string, true>;
+  canEdit: boolean;
+  onOpen: (taskId: string) => void;
+  onAdd: (opts?: { columnId?: string; dueDate?: string }) => void;
+};
+
+export const VIEWS = ["board", "list", "calendar", "timeline", "dashboard"] as const;
+export type ViewId = (typeof VIEWS)[number];

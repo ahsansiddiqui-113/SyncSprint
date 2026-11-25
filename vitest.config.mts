@@ -4,9 +4,9 @@ import path from "node:path";
 export default defineConfig({
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": path.resolve(import.meta.dirname, "src"),
       // `server-only` throws outside the RSC bundler; it's a no-op in tests.
-      "server-only": path.resolve(__dirname, "src/tests/server-only-stub.ts"),
+      "server-only": path.resolve(import.meta.dirname, "src/tests/server-only-stub.ts"),
     },
   },
   test: {

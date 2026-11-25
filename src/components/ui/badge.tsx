@@ -43,13 +43,19 @@ export function PriorityBadge({ priority }: { priority: TaskPriority }) {
 
 /* -------------------------------- statuses ------------------------------- */
 
-const STATUS_COLORS = ["#87909e", "#7b68ee", "#ff9800", "#e44a8a", "#49ccf9"];
-export const DONE_COLOR = "#2db87d";
+/**
+ * Status palette, validated with the dataviz validator on white (lightness band,
+ * chroma floor, adjacent CVD separation >= 8, normal-vision floor, >= 3:1 contrast).
+ * Order is fixed: open statuses take slots in order and the last column is always "done".
+ */
+export const STATUS_SLOTS = ["#3f7cb8", "#8a5cf6", "#dd6b00"] as const;
+export const DONE_COLOR = "#0f9d74";
+/** Extra open statuses beyond the validated slots are neutral (never a cycled hue); the pill label carries identity. */
+export const STATUS_OVERFLOW = "#7a8290";
 
-/** Columns get a stable ClickUp-style status color by position (last column = done = green). */
 export function statusColor(index: number, total: number) {
   if (index === total - 1) return DONE_COLOR;
-  return STATUS_COLORS[index % STATUS_COLORS.length]!;
+  return STATUS_SLOTS[index] ?? STATUS_OVERFLOW;
 }
 
 export function StatusPill({ title, color, count, className }: { title: string; color: string; count?: number; className?: string }) {
