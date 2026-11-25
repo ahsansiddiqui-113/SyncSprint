@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB, DbOrTx } from "@/db";
-import { auditLogs, checklistItems, tags, taskDependencies, taskTags, tasks } from "@/db/schema";
+import { auditLogs, checklistItems, customFields, tags, taskAssignees, taskDependencies, taskFieldValues, taskTags, taskWatchers, tasks, type SelectOption } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { POSITION_STEP } from "@/lib/fractional-index";
 import { requireOrgPermission } from "@/lib/rbac";
@@ -30,6 +30,10 @@ export type ProjectMeta = {
   tagsByTask: Record<string, string[]>;
   tags: { id: string; name: string; color: string }[];
   deps: { blockerId: string; blockedId: string }[];
+  fields: { id: string; name: string; type: "text" | "number" | "select" | "date" | "person"; options: SelectOption[] }[];
+  fieldValues: Record<string, Record<string, string | number>>;
+  coAssignees: Record<string, string[]>;
+  watchers: Record<string, string[]>;
 };
 
 /** Everything the views need to decorate cards, in four bounded queries. */
@@ -37,7 +41,7 @@ export async function getProjectMeta(conn: DB, actorId: string, organizationId: 
   await requireOrgPermission(actorId, organizationId, "viewer", conn);
   const inProject = and(eq(tasks.organizationId, organizationId), eq(tasks.projectId, projectId));
 
-  const [checks, tagLinks, orgTags, deps] = await Promise.all([
+  const [checks, tagLinks, orgTags, deps, fieldRows, valueRows, coRows, watchRows] = await Promise.all([
     conn
       .select({
         taskId: checklistItems.taskId,
@@ -63,7 +67,33 @@ export async function getProjectMeta(conn: DB, actorId: string, organizationId: 
       .from(taskDependencies)
       .innerJoin(tasks, eq(tasks.id, taskDependencies.blockedId))
       .where(and(eq(taskDependencies.organizationId, organizationId), inProject)),
+    conn
+      .select({ id: customFields.id, name: customFields.name, type: customFields.type, options: customFields.options })
+      .from(customFields)
+      .where(and(eq(customFields.organizationId, organizationId), eq(customFields.projectId, projectId)))
+      .orderBy(asc(customFields.position)),
+    conn
+      .select({ taskId: taskFieldValues.taskId, fieldId: taskFieldValues.fieldId, value: taskFieldValues.value })
+      .from(taskFieldValues)
+      .innerJoin(tasks, eq(tasks.id, taskFieldValues.taskId))
+      .where(and(eq(taskFieldValues.organizationId, organizationId), inProject)),
+    conn
+      .select({ taskId: taskAssignees.taskId, userId: taskAssignees.userId })
+      .from(taskAssignees)
+      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+      .where(and(eq(taskAssignees.organizationId, organizationId), inProject)),
+    conn
+      .select({ taskId: taskWatchers.taskId, userId: taskWatchers.userId })
+      .from(taskWatchers)
+      .innerJoin(tasks, eq(tasks.id, taskWatchers.taskId))
+      .where(and(eq(taskWatchers.organizationId, organizationId), inProject)),
   ]);
+  const fieldValues: Record<string, Record<string, string | number>> = {};
+  for (const v of valueRows) (fieldValues[v.taskId] ??= {})[v.fieldId] = v.value;
+  const coAssignees: Record<string, string[]> = {};
+  for (const c of coRows) (coAssignees[c.taskId] ??= []).push(c.userId);
+  const watchers: Record<string, string[]> = {};
+  for (const w of watchRows) (watchers[w.taskId] ??= []).push(w.userId);
 
   const tagsByTask: Record<string, string[]> = {};
   for (const l of tagLinks) (tagsByTask[l.taskId] ??= []).push(l.tagId);
@@ -72,6 +102,10 @@ export async function getProjectMeta(conn: DB, actorId: string, organizationId: 
     tagsByTask,
     tags: orgTags,
     deps,
+    fields: fieldRows,
+    fieldValues,
+    coAssignees,
+    watchers,
   };
 }
 

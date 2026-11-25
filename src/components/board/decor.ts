@@ -18,7 +18,7 @@ export type TaskDecor = {
   deps: ProjectMeta["deps"];
 };
 
-export const EMPTY_META: ProjectMeta = { checklist: {}, tagsByTask: {}, tags: [], deps: [] };
+export const EMPTY_META: ProjectMeta = { checklist: {}, tagsByTask: {}, tags: [], deps: [], fields: [], fieldValues: {}, coAssignees: {}, watchers: {} };
 
 export function buildDecor(tasks: Record<string, TaskDTO>, meta: ProjectMeta, doneColumnId: string | null): TaskDecor {
   const subtasks = new Map<string, { done: number; total: number }>();

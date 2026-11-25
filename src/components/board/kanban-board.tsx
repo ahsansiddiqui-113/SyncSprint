@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarDays, ChartGantt, ChevronRight, Eye, Kanban, LayoutDashboard, List as ListIcon, Plus, Rocket, Shuffle, Sparkles } from "lucide-react";
+import { CalendarDays, ChartGantt, ChevronRight, Eye, Gauge, Kanban, LayoutDashboard, List as ListIcon, Plus, Rocket, Settings2, Shuffle, Sparkles, Table2 } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import type { OrgEvent, PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -33,10 +33,19 @@ import { CalendarView } from "./views/calendar-view";
 import { TimelineView } from "./views/timeline-view";
 import { DashboardView } from "./views/dashboard-view";
 import { SprintsView } from "./views/sprints-view";
+import { TableView, type SortState, type WeekLoad } from "./views/table-view";
+import { WorkloadView } from "./views/workload-view";
+import { CustomizePanel } from "./customize-panel";
+import { ViewsMenu, type GroupBy } from "./views-menu";
+import { showCapacityWarnings } from "./capacity-warnings";
+import { getWorkloadAction } from "@/actions/capacity.actions";
+import { setFieldValueAction } from "@/actions/customize.actions";
+import { startOfWeek, addDays, todayISO } from "@/lib/dates";
+import type { SavedViewConfig } from "@/db/schema";
 import { VIEWS, type TaskPatch, type ViewId, type ViewProps } from "./views/types";
 
 export type Member = { id: string; name: string; avatarUrl: string | null; role: OrgRole };
-export type Column = { id: string; title: string };
+export type Column = { id: string; title: string; color?: string | null };
 export type BoardCtx = {
   org: { id: string; slug: string; name: string; isDemo: boolean };
   project: { id: string; key: string; name: string };
@@ -50,9 +59,11 @@ export type BoardCtx = {
 const VIEW_META: Record<ViewId, { label: string; icon: typeof Kanban }> = {
   board: { label: "Board", icon: Kanban },
   list: { label: "List", icon: ListIcon },
+  table: { label: "Table", icon: Table2 },
   sprints: { label: "Sprints", icon: Rocket },
   calendar: { label: "Calendar", icon: CalendarDays },
   timeline: { label: "Timeline", icon: ChartGantt },
+  workload: { label: "Workload", icon: Gauge },
   dashboard: { label: "Dashboard", icon: LayoutDashboard },
 };
 
@@ -80,6 +91,12 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   /** Bumped whenever meta reloads, so an open drawer refetches its checklist. */
   const [metaVersion, setMetaVersion] = useState(0);
   const [sprints, setSprints] = useState<SprintDTO[]>([]);
+  const [sort, setSort] = useState<SortState>(null);
+  const [groupBy, setGroupBy] = useState<GroupBy>("status");
+  const [showCustomize, setShowCustomize] = useState(false);
+  /** Bumped on anything that changes workload (task edits, co-assignees, capacity settings). */
+  const [workloadKey, setWorkloadKey] = useState(0);
+  const [weekLoad, setWeekLoad] = useState<WeekLoad>(new Map());
   const [simPending, startSim] = useTransition();
   /** `${taskId}:${version}` of writes this tab made, to tell our own echoes from another tab's. */
   const ownWrites = useRef(new Set<string>());
@@ -115,6 +132,22 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     return () => clearTimeout(metaTimer.current);
   }, [loadMeta]);
 
+  // This week's load per person, shown in assignee pickers before anyone is assigned.
+  const taskVersionKey = Object.values(state.tasks).reduce((s, t) => s + t.version, 0);
+  useEffect(() => {
+    const from = startOfWeek(todayISO());
+    const id = setTimeout(async () => {
+      const r = await getWorkloadAction(org.id, from, addDays(from, 6), todayISO());
+      if (r.ok) setWeekLoad(new Map(r.people.map((p) => [p.userId, { load: p.totalLoad, capacity: p.totalCapacity, status: p.status }])));
+    }, 400);
+    return () => clearTimeout(id);
+  }, [org.id, taskVersionKey, workloadKey]);
+  const onWarnings = useCallback(
+    (ws: Parameters<typeof showCapacityWarnings>[0]) => showCapacityWarnings(ws, () => setViewRef.current("workload")),
+    []
+  );
+  const setViewRef = useRef<(v: ViewId) => void>(() => {});
+
   const loadSprints = useCallback(async () => {
     const r = await listSprintsAction(org.id, project.id);
     if (r.ok) setSprints(r.sprints);
@@ -131,6 +164,8 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     else url.searchParams.set("view", v);
     window.history.replaceState(null, "", url);
   };
+
+  setViewRef.current = setView;
 
   const flashTask = (id: string) => {
     setFlash((f) => ({ ...f, [id]: true }));
@@ -170,12 +205,22 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           if (openTaskId === e.taskId) setOpenTaskId(null);
           loadMeta(250); // the cascade removed its checklist, tags and dependencies
           return;
+        case "PROJECT_CONFIG_CHANGED":
+          if (e.projectId === project.id) {
+            router.refresh(); // statuses come from the server page
+            loadMeta(150); // custom field definitions
+          }
+          return;
+        case "CAPACITY_CHANGED":
+          setWorkloadKey((k) => k + 1);
+          return;
         case "SPRINTS_CHANGED":
           if (e.projectId === project.id) void loadSprints();
           return;
         case "TASK_META_CHANGED":
           if (e.projectId !== project.id) return;
           loadMeta(250);
+          if (e.kind === "people") setWorkloadKey((k) => k + 1);
           if (e.actor.id !== me.id) e.taskIds.forEach(flashTask);
           return;
         case "COLUMN_REBALANCED":
@@ -244,11 +289,33 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     void commitMove(task, target, last + POSITION_STEP);
   }
 
+  /** Change status from a dropdown (table): append to the end of the target column. */
+  function moveToStatus(task: TaskDTO, columnId: string) {
+    if (task.columnId === columnId) return;
+    const last = Object.values(state.tasks)
+      .filter((t) => t.columnId === columnId)
+      .reduce((m, t) => Math.max(m, t.position), 0);
+    void commitMove(task, columnId, last + POSITION_STEP);
+  }
+
+  async function setFieldValue(taskId: string, fieldId: string, value: string | number | null) {
+    const r = await setFieldValueAction(org.id, taskId, fieldId, value);
+    if (!r.ok) return void toast.error(r.message);
+    loadMeta();
+  }
+
+  function applySavedView(c: SavedViewConfig) {
+    setView((VIEWS as readonly string[]).includes(c.view) ? (c.view as ViewId) : "board");
+    setFilters({ ...EMPTY_FILTERS, ...(c.filters as Partial<Filters>) });
+    setSort(c.sort ?? null);
+    setGroupBy((c.groupBy as GroupBy) ?? "status");
+  }
+
   /** Same contract for field edits made directly in a view (calendar/timeline). */
   async function commitPatch(task: TaskDTO, patch: TaskPatch) {
     dispatch({ type: "force", task: { ...task, ...patch } });
     ownWrites.current.add(`${task.id}:${task.version + 1}`);
-    const res = await updateTaskAction({ organizationId: org.id, taskId: task.id, expectedVersion: task.version, patch });
+    const res = await updateTaskAction({ organizationId: org.id, taskId: task.id, expectedVersion: task.version, patch }, todayISO());
     if (!res.ok) {
       dispatch({ type: "force", task });
       toast.error(res.message);
@@ -256,6 +323,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     }
     if (res.conflict) return handleConflict(task, res.current);
     dispatch({ type: "server", task: res.task });
+    onWarnings(res.warnings);
     if ("dueDate" in patch) toast.success(patch.dueDate ? `${refOf(task)} rescheduled` : `${refOf(task)} unscheduled`, { duration: 1800 });
     if ("sprintId" in patch) {
       const s = sprints.find((x) => x.id === patch.sprintId);
@@ -272,7 +340,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const viewProps: ViewProps = {
     tasks: visible,
     columns,
-    colorOf: (i) => statusColor(i, columns.length),
+    colorOf: (i) => columns[i]?.color ?? statusColor(i, columns.length),
     doneColumnId,
     refOf,
     memberById,
@@ -325,6 +393,11 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
                 <Shuffle className="h-4 w-4" /> Simulate teammate
               </Button>
             )}
+            {can(role, "MANAGE_PROJECTS") && (
+              <Button variant="outline" size="sm" onClick={() => setShowCustomize(true)} title="Statuses and custom fields">
+                <Settings2 className="h-4 w-4" /> Customize
+              </Button>
+            )}
             <Button variant="ai" size="sm" onClick={() => setShowDigest(true)}>
               <Sparkles className="h-4 w-4" /> AI standup
             </Button>
@@ -359,7 +432,26 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
         </nav>
       </header>
 
-      <FilterBar filters={filters} onChange={setFilters} members={members} tags={decor.tags} sprints={sprints} shown={Object.keys(visible).length} total={all.length} />
+      <FilterBar filters={filters} onChange={setFilters} members={members} tags={decor.tags}
+        sprints={sprints}
+        shown={Object.keys(visible).length}
+        total={all.length}
+        extra={
+          <ViewsMenu
+            organizationId={org.id}
+            projectId={project.id}
+            view={view}
+            filters={filters}
+            sort={sort}
+            groupBy={groupBy}
+            meta={meta}
+            canShare={canEdit}
+            onApply={applySavedView}
+            onSort={setSort}
+            onGroup={setGroupBy}
+          />
+        }
+      />
 
       {!canEdit && (
         <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-8 py-2.5 text-[15px] text-amber-800">
@@ -369,7 +461,30 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
       )}
 
       {view === "board" && <BoardView {...viewProps} projectId={project.id} onMove={commitMove} />}
-      {view === "list" && <ListView {...viewProps} />}
+      {view === "list" && <ListView {...viewProps} groupBy={groupBy} sort={sort} sprints={sprints} meta={meta} />}
+      {view === "table" && (
+        <TableView
+          {...viewProps}
+          meta={meta}
+          sprints={sprints}
+          sort={sort}
+          onSort={setSort}
+          weekLoad={weekLoad}
+          onPatch={commitPatch}
+          onStatus={moveToStatus}
+          onFieldValue={setFieldValue}
+        />
+      )}
+      {view === "workload" && (
+        <WorkloadView
+          organizationId={org.id}
+          members={members}
+          canManage={can(role, "INVITE_OR_CHANGE_ROLES")}
+          refreshKey={workloadKey + taskVersionKey}
+          projectTaskIds={new Set(Object.keys(state.tasks))}
+          onOpen={setOpenTaskId}
+        />
+      )}
       {view === "sprints" && (
         <SprintsView
           {...viewProps}
@@ -398,6 +513,10 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           onOpenTask={setOpenTaskId}
           onToggleDone={toggleDone}
           sprints={sprints}
+          meta={meta}
+          weekLoad={weekLoad}
+          onWarnings={onWarnings}
+          onFieldValue={setFieldValue}
           onClose={() => {
             setOpenTaskId(null);
             setEditing(false);
@@ -426,6 +545,8 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           initialColumnId={newTask.columnId}
           initialDueDate={newTask.dueDate}
           sprints={sprints}
+          weekLoad={weekLoad}
+          onWarnings={onWarnings}
           onClose={() => setNewTask(null)}
           onCreated={(t) => {
             ownWrites.current.add(`${t.id}:${t.version}`);
@@ -435,6 +556,20 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
         />
       )}
       {showDigest && <DigestPanel ctx={ctx} onClose={() => setShowDigest(false)} />}
+      {showCustomize && (
+        <CustomizePanel
+          organizationId={org.id}
+          projectId={project.id}
+          columns={columns}
+          colorOf={viewProps.colorOf}
+          meta={meta}
+          onClose={() => setShowCustomize(false)}
+          onChanged={() => {
+            router.refresh();
+            loadMeta();
+          }}
+        />
+      )}
     </div>
   );
 }

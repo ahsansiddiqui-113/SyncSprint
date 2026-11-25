@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Loader2, Wand2 } from "lucide-react";
+import { AlertTriangle, Loader2, Wand2 } from "lucide-react";
 import type { TaskPriority } from "@/db/schema";
 import type { TaskDTO } from "@/lib/realtime-protocol";
 import { createTaskAction } from "@/actions/task.actions";
@@ -14,6 +14,10 @@ import { PRIORITY_STYLE } from "@/components/ui/badge";
 import type { WorkItemType } from "@/db/schema";
 import type { SprintDTO } from "@/server/services/sprints";
 import { TYPE_META, WORK_ITEM_TYPES } from "./task-meta";
+import { loadHint, type WeekLoad } from "./views/table-view";
+import type { CapacityWarning } from "@/server/services/capacity";
+import { cn } from "@/lib/utils";
+import { todayISO } from "@/lib/dates";
 import { aiSourceLabel } from "@/lib/ai-label";
 import type { BoardCtx } from "./kanban-board";
 
@@ -22,6 +26,8 @@ export function NewTaskDialog({
   initialColumnId,
   initialDueDate,
   sprints,
+  weekLoad,
+  onWarnings,
   onClose,
   onCreated,
 }: {
@@ -29,6 +35,8 @@ export function NewTaskDialog({
   initialColumnId?: string;
   initialDueDate?: string;
   sprints: SprintDTO[];
+  weekLoad: WeekLoad;
+  onWarnings: (w: CapacityWarning[] | undefined) => void;
   onClose: () => void;
   onCreated: (t: TaskDTO) => void;
 }) {
@@ -37,6 +45,17 @@ export function NewTaskDialog({
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [columnId, setColumnId] = useState(initialColumnId ?? ctx.columns[0]?.id ?? "");
   const [assigneeId, setAssigneeId] = useState("");
+  const [estimate, setEstimate] = useState("");
+  // Pre-assignment heads-up (non-blocking): this week's load + this estimate vs capacity.
+  const load = assigneeId ? weekLoad.get(assigneeId) : undefined;
+  const est = Number(estimate) || 0;
+  const projected = load ? load.load + est : 0;
+  const capacityNote =
+    load && load.capacity > 0 && (load.status === "over" || projected > load.capacity)
+      ? { level: "over" as const, text: `${ctx.members.find((m) => m.id === assigneeId)?.name ?? "This person"} would be over capacity this week: ${Math.round(projected * 10) / 10}h of ${load.capacity}h.` }
+      : load && load.capacity > 0 && (load.status === "near" || projected >= load.capacity * 0.85)
+        ? { level: "near" as const, text: `${ctx.members.find((m) => m.id === assigneeId)?.name ?? "This person"} is near capacity this week: ${Math.round(projected * 10) / 10}h of ${load.capacity}h.` }
+        : null;
   const [dueDate, setDueDate] = useState(initialDueDate ?? "");
   const [points, setPoints] = useState("");
   const [type, setType] = useState<WorkItemType>("task");
@@ -61,11 +80,13 @@ export function NewTaskDialog({
               assigneeId: assigneeId || null,
               dueDate: dueDate || null,
               storyPoints: points === "" ? null : Number(points),
+              estimateHours: estimate === "" ? null : Math.round(Number(estimate) * 4) / 4,
               type,
               sprintId: sprintId || null,
-            });
+            }, todayISO());
             if (!r.ok) return void toast.error(r.message);
             onCreated(r.task);
+            onWarnings(r.warnings);
             toast.success(`Created ${ctx.project.key}-${r.task.taskNumber}`);
             onClose();
           });
@@ -127,7 +148,7 @@ export function NewTaskDialog({
             <Label htmlFor="n-asg">Assignee</Label>
             <Select id="n-asg" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
               <option value="">Unassigned</option>
-              {ctx.members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              {ctx.members.map((m) => <option key={m.id} value={m.id}>{m.name}{loadHint(m.id, weekLoad)}</option>)}
             </Select>
           </div>
         </div>
@@ -149,7 +170,11 @@ export function NewTaskDialog({
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <div className="col-span-2 space-y-1">
+          <div className="space-y-1">
+            <Label htmlFor="n-est">Estimate (h)</Label>
+            <Input id="n-est" type="number" min={0} max={1000} step={0.25} value={estimate} onChange={(e) => setEstimate(e.target.value)} placeholder="—" />
+          </div>
+          <div className="space-y-1">
             <Label htmlFor="n-due">Due date</Label>
             <Input id="n-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </div>
@@ -161,6 +186,20 @@ export function NewTaskDialog({
             </Select>
           </div>
         </div>
+        {capacityNote && (
+          <div
+            role="status"
+            className={cn(
+              "flex items-start gap-2 rounded-lg border px-3 py-2 text-[14px]",
+              capacityNote.level === "over" ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800"
+            )}
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              {capacityNote.text} You can still create the task — consider another assignee or a later due date.
+            </span>
+          </div>
+        )}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button disabled={pending || !title.trim()}>{pending ? "Creating…" : "Create task"}</Button>

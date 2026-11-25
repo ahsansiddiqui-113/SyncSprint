@@ -41,6 +41,7 @@ export function FilterBar({
   sprints,
   shown,
   total,
+  extra,
 }: {
   filters: Filters;
   onChange: (f: Filters) => void;
@@ -49,6 +50,7 @@ export function FilterBar({
   sprints: SprintDTO[];
   shown: number;
   total: number;
+  extra?: React.ReactNode;
 }) {
   const count = activeFilterCount(filters);
   const set = (patch: Partial<Filters>) => onChange({ ...filters, ...patch });
@@ -174,6 +176,7 @@ export function FilterBar({
           </span>
         </>
       )}
+      {extra}
     </div>
   );
 }

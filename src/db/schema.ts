@@ -22,6 +22,8 @@ export const orgRoleEnum = pgEnum("org_role", ["owner", "admin", "member", "view
 export const taskPriorityEnum = pgEnum("task_priority", ["low", "medium", "high", "urgent"]);
 export const inviteStatusEnum = pgEnum("invite_status", ["pending", "accepted", "revoked"]);
 export const sprintStatusEnum = pgEnum("sprint_status", ["planned", "active", "completed"]);
+export const customFieldTypeEnum = pgEnum("custom_field_type", ["text", "number", "select", "date", "person"]);
+export const timeOffKindEnum = pgEnum("time_off_kind", ["vacation", "sick", "holiday", "other"]);
 /** Work item types (Azure Boards / Jira style). Hierarchy uses parentId (one level). */
 export const workItemTypeEnum = pgEnum("work_item_type", ["epic", "story", "task", "bug"]);
 
@@ -195,6 +197,8 @@ export const boardColumns = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     title: varchar("title", { length: 80 }).notNull(),
     position: doublePrecision("position").notNull(),
+    /** Custom status color; null = default palette by position. */
+    color: varchar("color", { length: 7 }),
   },
   (t) => [index("columns_project_idx").on(t.organizationId, t.projectId)]
 );
@@ -229,6 +233,8 @@ export const tasks = pgTable(
     startDate: date("start_date", { mode: "string" }),
     dueDate: date("due_date", { mode: "string" }),
     storyPoints: integer("story_points"),
+    /** Time estimate in hours (drives workload/capacity; separate from story points). */
+    estimateHours: doublePrecision("estimate_hours"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     ...timestamps,
   },
@@ -364,6 +370,159 @@ export const taskDependencies = pgTable(
   ]
 );
 
+// 7e. Custom fields (per project) and their values per task
+export type SelectOption = { id: string; label: string; color: string };
+export const customFields = pgTable(
+  "custom_fields",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 60 }).notNull(),
+    type: customFieldTypeEnum("type").notNull(),
+    options: jsonb("options").$type<SelectOption[]>().default([]).notNull(),
+    position: doublePrecision("position").notNull(),
+    ...timestamps,
+  },
+  (t) => [index("custom_fields_project_idx").on(t.organizationId, t.projectId), uniqueIndex("custom_fields_name_idx").on(t.projectId, t.name)]
+);
+
+export const taskFieldValues = pgTable(
+  "task_field_values",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    fieldId: uuid("field_id")
+      .notNull()
+      .references(() => customFields.id, { onDelete: "cascade" }),
+    /** text: string · number: number · select: option id · date: "YYYY-MM-DD" · person: user id */
+    value: jsonb("value").$type<string | number>().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.fieldId] }), index("field_values_org_idx").on(t.organizationId, t.fieldId)]
+);
+
+// 7f. Co-assignees (the primary assignee stays on tasks.assignee_id) and watchers
+export const taskAssignees = pgTable(
+  "task_assignees",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.userId] }), index("task_assignees_user_idx").on(t.organizationId, t.userId)]
+);
+
+export const taskWatchers = pgTable(
+  "task_watchers",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    ...timestamps,
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.userId] }), index("task_watchers_user_idx").on(t.organizationId, t.userId)]
+);
+
+// 7h. Capacity: workspace work schedule, per-person overrides and time off
+/** Hours per weekday, Monday first: [mon, tue, wed, thu, fri, sat, sun]. */
+export type WeekHours = [number, number, number, number, number, number, number];
+
+export const workSchedules = pgTable("work_schedules", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  hours: jsonb("hours").$type<WeekHours>().notNull(),
+  /** Load at or above this % of capacity is "near capacity". */
+  nearThreshold: integer("near_threshold").default(85).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const memberCapacity = pgTable(
+  "member_capacity",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    hours: jsonb("hours").$type<WeekHours>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.organizationId, t.userId] })]
+);
+
+/** Full days off. userId null = a workspace-wide holiday. */
+export const timeOff = pgTable(
+  "time_off",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    kind: timeOffKindEnum("kind").default("vacation").notNull(),
+    startDate: date("start_date", { mode: "string" }).notNull(),
+    endDate: date("end_date", { mode: "string" }).notNull(),
+    note: varchar("note", { length: 120 }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [
+    index("time_off_org_dates_idx").on(t.organizationId, t.startDate, t.endDate),
+    check("time_off_dates_order", sql`${t.startDate} <= ${t.endDate}`),
+  ]
+);
+
+// 7g. Saved views (personal by default; can be shared with the project)
+export type SavedViewConfig = {
+  view: string;
+  filters: Record<string, unknown>;
+  sort?: { key: string; dir: "asc" | "desc" } | null;
+  groupBy?: string | null;
+};
+export const savedViews = pgTable(
+  "saved_views",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 60 }).notNull(),
+    config: jsonb("config").$type<SavedViewConfig>().notNull(),
+    shared: boolean("shared").default(false).notNull(),
+    ...timestamps,
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("saved_views_project_idx").on(t.organizationId, t.projectId)]
+);
+
 // 8. Task comments
 export const taskComments = pgTable(
   "task_comments",
@@ -430,3 +589,8 @@ export type Tag = typeof tags.$inferSelect;
 export type Sprint = typeof sprints.$inferSelect;
 export type SprintStatus = (typeof sprintStatusEnum.enumValues)[number];
 export type WorkItemType = (typeof workItemTypeEnum.enumValues)[number];
+export type CustomField = typeof customFields.$inferSelect;
+export type CustomFieldType = (typeof customFieldTypeEnum.enumValues)[number];
+export type SavedView = typeof savedViews.$inferSelect;
+export type TimeOff = typeof timeOff.$inferSelect;
+export type TimeOffKind = (typeof timeOffKindEnum.enumValues)[number];

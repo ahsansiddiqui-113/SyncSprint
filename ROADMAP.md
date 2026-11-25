@@ -42,12 +42,19 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
 - ✅ **Work item types**: Epic, Story, Task, Bug (icons, picker, filter). Hierarchy uses subtasks (one level); a deeper Epic → Feature → Story tree is a later step
 - ⬜ Sprint capacity per person (moved to Phase 6 with the Workload view)
 
-## Phase 4 — Customization
-- ⬜ Custom statuses per project (add/rename/reorder/color columns)
-- ⬜ **Custom fields** (text, number, dropdown, date, people)
-- ⬜ Table view (spreadsheet-like inline editing)
-- ⬜ Saved views and filters per user, with group-by and sort options
-- ⬜ Multiple assignees, watchers
+## Phase 4 — Customization, workload & capacity ✅
+- ✅ **Custom statuses** per project: add (before Done), rename, recolor, reorder, delete with task move. The last status always means Done
+- ✅ **Custom fields**: text, number, dropdown (colored options), date, person — validated per type
+- ✅ **Table view**: spreadsheet-style inline editing of every field, sortable columns
+- ✅ **Saved views** (personal or shared) with filters, sort and List group-by (status, assignee, priority, type, sprint)
+- ✅ **Multiple assignees** (co-assignees) and **watchers**
+- ✅ **Workload & capacity** (researched against Azure Boards, ClickUp, Asana, Jira, Wrike, Smartsheet):
+  - owners/admins set a workspace schedule (default Mon–Fri 8h = 40h/week), per-person hours per weekday, time off and workspace holidays
+  - tasks get hour estimates, spread evenly over the assignee's working days and split between assignees; done work doesn't count; overdue work lands on today
+  - load counts across all projects; checked per day first (a 12h day is over even if the week fits)
+  - near (≥ 85%, configurable) and over (> 100%) shown with icon + text, never color alone
+  - **warnings never block**: assignee pickers show this week's load, forms show a heads-up before saving, and saves return a warning naming the day and the overage
+  - **Workload view**: people × days grid with load vs capacity, task breakdown per cell, unestimated / undated counts
 
 ## Phase 5 — Collaboration & productivity
 - ⬜ @mentions + in-app notifications inbox

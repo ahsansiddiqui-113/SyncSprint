@@ -1,8 +1,9 @@
 import "dotenv/config";
+import { watch } from "node:fs";
 import { createServer } from "node:http";
 import next from "next";
 import { closeDb, db } from "@/db";
-import { runMigrations } from "@/db/migrate";
+import { MIGRATIONS_FOLDER, runMigrations } from "@/db/migrate";
 import { createWsUpgradeHandler } from "@/server/ws-server";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -41,6 +42,20 @@ ${signal} received — shutting down…`);
       .finally(() => process.exit(0));
   };
   for (const sig of ["SIGINT", "SIGTERM", "SIGBREAK", "SIGHUP"] as const) process.on(sig, () => shutdown(sig));
+
+  // Dev: apply newly generated migrations without a restart. Otherwise hot-reloaded
+  // schema code can query columns the database doesn't have yet.
+  if (dev) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    watch(MIGRATIONS_FOLDER, { recursive: true }, () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        runMigrations(db)
+          .then(() => console.log("✔ database migrations up to date"))
+          .catch((err) => console.error("✖ migration failed:", err instanceof Error ? err.message : err));
+      }, 500);
+    });
+  }
 
   server.listen(port, () => {
     console.log(`▲ SyncSprint ready on ${appUrl} (${dev ? "dev" : "prod"}) — WebSocket at /ws`);

@@ -29,6 +29,13 @@
       "when": 1795633635373,
       "tag": "0003_sprints",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795634524789,
+      "tag": "0004_customization_capacity",
+      "breakpoints": true
     }
   ]
 }

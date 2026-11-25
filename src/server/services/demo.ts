@@ -1,10 +1,14 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   auditLogs,
   sprints,
   sprintSnapshots,
+  memberCapacity,
+  taskAssignees,
+  timeOff,
+  workSchedules,
   checklistItems,
   tags,
   taskDependencies,
@@ -166,6 +170,7 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
       if (p.key === "ENG") {
         await seedBreakdown(created, project!.id, cols);
         await seedSprints(project!.id, cols);
+        await seedCapacity(project!.id, cols);
       }
     }
 
@@ -174,6 +179,50 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
      * active sprint with a week of daily snapshots (burndown/burnup, including a
      * mid-sprint scope increase) and a planned next sprint.
      */
+    /**
+     * Workload sample data: hour estimates on open work, a part-time teammate with
+     * time off next week, and one person deliberately overloaded this week so the
+     * Workload view and capacity warnings have something real to show.
+     */
+    async function seedCapacity(projectId: string, cols: (typeof boardColumns.$inferSelect)[]) {
+      const [sara, alex, priya] = mates;
+      await tx.insert(workSchedules).values({ organizationId: orgId, hours: [8, 8, 8, 8, 8, 0, 0], nearThreshold: 85 });
+      // Priya: part-time, Mon–Thu 6h (24h/week).
+      await tx.insert(memberCapacity).values({ organizationId: orgId, userId: priya!.id, hours: [6, 6, 6, 6, 0, 0, 0] });
+      // Priya is on vacation for two days next week.
+      const nextMon = (() => {
+        const d = new Date();
+        const wd = (d.getUTCDay() + 6) % 7;
+        return day(7 - wd);
+      })();
+      const plus = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+      await tx.insert(timeOff).values({ organizationId: orgId, userId: priya!.id, kind: "vacation", startDate: plus(nextMon, 1), endDate: plus(nextMon, 2), note: "Family trip" });
+
+      const open = (await tx.select().from(tasks).where(eq(tasks.projectId, projectId))).filter((t) => t.columnId !== cols[cols.length - 1]!.id);
+      for (const t of open) {
+        // ~1.5h per story point, rounded to the half hour.
+        const est = Math.max(1, Math.round((t.storyPoints ?? 2) * 1.5 * 2) / 2);
+        await tx.update(tasks).set({ estimateHours: est }).where(eq(tasks.id, t.id));
+      }
+      // Alex is overloaded this week: a big task due in 2 days on top of their sprint work.
+      const [counter] = await tx.update(projects).set({ taskCounter: sql`${projects.taskCounter} + 1` }).where(eq(projects.id, projectId)).returning({ n: projects.taskCounter });
+      const [big] = await tx
+        .insert(tasks)
+        .values({
+          organizationId: orgId, projectId, columnId: cols[1]!.id, taskNumber: counter!.n, title: "Migrate billing data to the new schema",
+          priority: "high", type: "story", assigneeId: alex!.id, estimateHours: 24, storyPoints: 8, startDate: day(0), dueDate: day(2),
+          position: 95 * POSITION_STEP, createdAt: minutesAgo(60 * 3), updatedAt: minutesAgo(60 * 3),
+        })
+        .returning();
+      // Shared work: Sara pairs with Alex on SSO (the estimate is split between them).
+      const sso = open.find((t) => t.title.startsWith("SSO"));
+      if (sso) await tx.insert(taskAssignees).values({ organizationId: orgId, taskId: sso.id, userId: sara!.id });
+      await tx.insert(auditLogs).values({
+        organizationId: orgId, actorId: sara!.id, action: "TASK_CREATED", entityType: "task", entityId: big!.id,
+        metadata: { ref: `ENG-${counter!.n}`, title: big!.title, columnId: cols[1]!.id }, createdAt: minutesAgo(60 * 3),
+      });
+    }
+
     async function seedSprints(projectId: string, cols: (typeof boardColumns.$inferSelect)[]) {
       const all = await tx.select().from(tasks).where(eq(tasks.projectId, projectId));
       const byNumber = (n: number) => all.find((t) => t.taskNumber === n);

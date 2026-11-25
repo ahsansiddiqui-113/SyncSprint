@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlignLeft, Plus, UserRound } from "lucide-react";
+import { AlignLeft, Plus, Timer, UserRound } from "lucide-react";
 import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { positionForIndex } from "@/lib/fractional-index";
 import { cn } from "@/lib/utils";
@@ -303,7 +303,12 @@ export function CardBody({
           {PRIORITY_STYLE[task.priority].label}
         </span>
         <DueChip due={task.dueDate} done={!!done} />
-        <PointsBadge points={task.storyPoints} className="ml-auto" />
+        {task.estimateHours ? (
+          <span title={`${task.estimateHours}h estimated`} className="ml-auto inline-flex items-center gap-1 text-[12.5px] tabular-nums text-muted">
+            <Timer className="h-3.5 w-3.5" /> {task.estimateHours}h
+          </span>
+        ) : null}
+        <PointsBadge points={task.storyPoints} className={task.estimateHours ? undefined : "ml-auto"} />
       </div>
     </article>
   );

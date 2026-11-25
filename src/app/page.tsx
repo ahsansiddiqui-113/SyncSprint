@@ -152,7 +152,7 @@ export default async function Home() {
         <section className="pt-20 text-center">
           <div className="mx-auto mb-7 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary-soft px-4 py-1.5 text-[14px] font-medium text-primary">
             <Sparkles className="h-4 w-4" />
-            New: Sprints with burndown and velocity
+            New: Workload view with capacity warnings
           </div>
           <h1 className="mx-auto max-w-5xl text-5xl font-extrabold leading-[1.05] tracking-[-0.035em] text-foreground sm:text-7xl">
             One board for your team. <span className="text-gradient">Always in sync.</span>

@@ -2,11 +2,17 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, Tag as TagIcon, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
+import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, SlidersHorizontal, Tag as TagIcon, Timer, Users, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
 import type { TaskPriority } from "@/db/schema";
 import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
 import { cn, timeAgo } from "@/lib/utils";
+import { todayISO } from "@/lib/dates";
+import { Fragment } from "react";
+import type { ProjectMeta } from "@/server/services/breakdown";
+import type { CapacityWarning } from "@/server/services/capacity";
+import { FieldEditor, loadHint, type WeekLoad } from "./views/table-view";
+import { CapacityNote, CoAssignees, WatchButton } from "./drawer-people";
 import { addCommentAction, deleteTaskAction, listCommentsAction, updateTaskAction } from "@/actions/task.actions";
 import { createSubtasksAction, decomposeTaskAction, explainConflictAction } from "@/actions/ai.actions";
 import { Button } from "@/components/ui/button";
@@ -34,6 +40,7 @@ function draftFrom(t: TaskDTO) {
     storyPoints: t.storyPoints === null ? "" : String(t.storyPoints),
     type: t.type,
     sprintId: t.sprintId ?? "",
+    estimateHours: t.estimateHours === null ? "" : String(t.estimateHours),
   };
 }
 
@@ -57,6 +64,10 @@ export function TaskDrawer(props: {
   onOpenTask: (id: string) => void;
   onToggleDone: (t: TaskDTO) => void;
   sprints: SprintDTO[];
+  meta: ProjectMeta;
+  weekLoad: WeekLoad;
+  onWarnings: (w: CapacityWarning[] | undefined) => void;
+  onFieldValue: (taskId: string, fieldId: string, value: string | number | null) => void;
 }) {
   const { ctx, task } = props;
   const canEdit = can(ctx.role, "CREATE_OR_MOVE_TASK");
@@ -78,7 +89,8 @@ export function TaskDrawer(props: {
     draft.dueDate !== (base.dueDate ?? "") ||
     draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints)) ||
     draft.type !== base.type ||
-    draft.sprintId !== (base.sprintId ?? "");
+    draft.sprintId !== (base.sprintId ?? "") ||
+    draft.estimateHours !== (base.estimateHours === null ? "" : String(base.estimateHours));
   const datesInvalid = !!draft.startDate && !!draft.dueDate && draft.startDate > draft.dueDate;
   const remoteChanged = task.version > base.version;
 
@@ -108,7 +120,10 @@ export function TaskDrawer(props: {
       if (draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints))) patch.storyPoints = draft.storyPoints === "" ? null : Number(draft.storyPoints);
       if (draft.type !== base.type) patch.type = draft.type;
       if (draft.sprintId !== (base.sprintId ?? "")) patch.sprintId = draft.sprintId || null;
-      const res = await updateTaskAction({ organizationId: ctx.org.id, taskId: task.id, expectedVersion: base.version, patch });
+      if (draft.estimateHours !== (base.estimateHours === null ? "" : String(base.estimateHours))) {
+        patch.estimateHours = draft.estimateHours === "" ? null : Math.round(Number(draft.estimateHours) * 4) / 4;
+      }
+      const res = await updateTaskAction({ organizationId: ctx.org.id, taskId: task.id, expectedVersion: base.version, patch }, todayISO());
       if (!res.ok) return void toast.error(res.message);
       if (res.conflict) {
         if (res.current) {
@@ -120,6 +135,7 @@ export function TaskDrawer(props: {
         return;
       }
       props.onServerTask(res.task);
+      props.onWarnings(res.warnings);
       setBase(res.task);
       toast.success("Saved");
     });
@@ -151,6 +167,7 @@ export function TaskDrawer(props: {
           <span className="rounded-md border border-border-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[14px] text-muted">{ref}</span>
           <span className="text-subtle">in</span>
           <span className="font-medium">{column?.title}</span>
+          <WatchButton ctx={ctx} task={task} watchers={props.meta.watchers[task.id] ?? []} onChanged={props.onMetaChanged} />
         </span>
       }
       footer={
@@ -280,8 +297,37 @@ export function TaskDrawer(props: {
           <span className="flex items-center gap-2 text-[15px] text-subtle"><UserRound className="h-3.5 w-3.5" /> Assignee</span>
           <Select aria-label="Assignee" className="h-8 max-w-60 border-transparent bg-transparent px-1.5 hover:border-border-strong" value={draft.assigneeId} onChange={(e) => setDraft({ ...draft, assigneeId: e.target.value })}>
             <option value="">Unassigned</option>
-            {ctx.members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {ctx.members.map((m) => <option key={m.id} value={m.id}>{m.name}{loadHint(m.id, props.weekLoad)}</option>)}
           </Select>
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Users className="h-3.5 w-3.5" /> Also assigned</span>
+          <CoAssignees
+            ctx={ctx}
+            task={task}
+            primary={draft.assigneeId || null}
+            current={props.meta.coAssignees[task.id] ?? []}
+            weekLoad={props.weekLoad}
+            disabled={!canEdit}
+            onChanged={props.onMetaChanged}
+            onWarnings={props.onWarnings}
+          />
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Timer className="h-3.5 w-3.5" /> Estimate</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              aria-label="Time estimate in hours"
+              min={0}
+              max={1000}
+              step={0.25}
+              value={draft.estimateHours}
+              placeholder="—"
+              onChange={(e) => setDraft({ ...draft, estimateHours: e.target.value })}
+              className="h-8 w-24 rounded-md border border-border bg-white px-2 text-right text-[14px] tabular-nums outline-none hover:border-border-strong focus:border-primary disabled:bg-transparent"
+            />
+            <span className="text-[14px] text-subtle">hours</span>
+            <CapacityNote ctx={ctx} assigneeId={draft.assigneeId} draftEstimate={Number(draft.estimateHours) || 0} savedEstimate={base.estimateHours ?? 0} savedAssignee={base.assigneeId} weekLoad={props.weekLoad} />
+          </div>
 
           <span className="flex items-center gap-2 text-[15px] text-subtle"><CalendarDays className="h-3.5 w-3.5" /> Dates</span>
           <div className="flex flex-wrap items-center gap-2">
@@ -336,6 +382,25 @@ export function TaskDrawer(props: {
           <Textarea aria-label="Description" rows={6} value={draft.description} placeholder="Add context, acceptance criteria, links… (markdown)" onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
         </Section>
       </fieldset>
+
+      {props.meta.fields.length > 0 && (
+        <Section title="Fields" icon={<SlidersHorizontal className="h-4 w-4 text-subtle" />}>
+          <div className="grid grid-cols-[160px_1fr] items-center gap-x-3 gap-y-1.5 rounded-xl border border-border p-3">
+            {props.meta.fields.map((f) => (
+              <Fragment key={f.id}>
+                <span className="truncate text-[14px] text-subtle">{f.name}</span>
+                <FieldEditor
+                  field={f}
+                  value={props.meta.fieldValues[task.id]?.[f.id]}
+                  disabled={!canEdit}
+                  members={ctx.members}
+                  onSave={(v) => props.onFieldValue(task.id, f.id, v)}
+                />
+              </Fragment>
+            ))}
+          </div>
+        </Section>
+      )}
 
       <SubtasksSection {...breakdown} />
       <ChecklistSection {...breakdown} />

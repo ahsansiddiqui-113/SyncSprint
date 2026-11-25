@@ -2,7 +2,7 @@ import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import type { Column, Member } from "../kanban-board";
 import type { TaskDecor } from "../decor";
 
-export type TaskPatch = Partial<Pick<TaskDTO, "title" | "description" | "priority" | "assigneeId" | "startDate" | "dueDate" | "storyPoints" | "type" | "sprintId">>;
+export type TaskPatch = Partial<Pick<TaskDTO, "title" | "description" | "priority" | "assigneeId" | "startDate" | "dueDate" | "storyPoints" | "estimateHours" | "type" | "sprintId">>;
 
 /** Props every project view receives. `tasks` is already filtered by the filter bar. */
 export type ViewProps = {
@@ -23,5 +23,5 @@ export type ViewProps = {
   allTasks: Record<string, TaskDTO>;
 };
 
-export const VIEWS = ["board", "list", "sprints", "calendar", "timeline", "dashboard"] as const;
+export const VIEWS = ["board", "list", "table", "sprints", "calendar", "timeline", "workload", "dashboard"] as const;
 export type ViewId = (typeof VIEWS)[number];

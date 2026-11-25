@@ -29,6 +29,12 @@ export const dateSchema = z
     return !Number.isNaN(t.getTime()) && t.toISOString().startsWith(d);
   }, "Invalid date");
 export const pointsSchema = z.number().int().min(0).max(100);
+/** Hours, in quarter-hour steps, up to 1,000. */
+export const estimateSchema = z
+  .number()
+  .min(0)
+  .max(1000)
+  .refine((n) => Math.abs(n * 4 - Math.round(n * 4)) < 1e-9, "Use quarter-hour steps");
 
 function assertDateOrder(start: string | null | undefined, due: string | null | undefined) {
   if (start && due && start > due) throw new AppError("VALIDATION", "Start date must be on or before the due date");
@@ -104,6 +110,7 @@ export const createTaskInput = z.object({
   startDate: dateSchema.nullish(),
   dueDate: dateSchema.nullish(),
   storyPoints: pointsSchema.nullish(),
+  estimateHours: estimateSchema.nullish(),
   parentId: z.string().uuid().nullish(),
   type: workItemTypeSchema.default("task"),
   sprintId: z.string().uuid().nullish(),
@@ -159,6 +166,7 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
         startDate: input.startDate ?? null,
         dueDate: input.dueDate ?? null,
         storyPoints: input.storyPoints ?? null,
+        estimateHours: input.estimateHours ?? null,
         parentId: input.parentId ?? null,
         type: input.type,
         sprintId: input.sprintId ?? null,
@@ -279,6 +287,7 @@ export const updateTaskInput = z.object({
       startDate: dateSchema.nullable(),
       dueDate: dateSchema.nullable(),
       storyPoints: pointsSchema.nullable(),
+      estimateHours: estimateSchema.nullable(),
       type: workItemTypeSchema,
       sprintId: z.string().uuid().nullable(),
     })

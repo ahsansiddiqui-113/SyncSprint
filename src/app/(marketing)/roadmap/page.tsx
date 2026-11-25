@@ -28,19 +28,19 @@ const PHASES: { name: string; status: Status; items: string[] }[] = [
     items: ["Sprints with goals and dates", "Backlog and sprint planning", "Burndown and burnup charts", "Velocity across sprints", "Epics, stories, tasks and bugs"],
   },
   {
-    name: "Customization",
-    status: "next",
-    items: ["Custom statuses per project", "Custom fields", "Spreadsheet-style table view", "Saved views", "Multiple assignees and watchers"],
+    name: "Customization & workload",
+    status: "shipped",
+    items: ["Custom statuses and custom fields", "Spreadsheet-style table view", "Saved views with sort and grouping", "Multiple assignees and watchers", "Workload view with capacity warnings"],
   },
   {
     name: "Collaboration",
-    status: "planned",
+    status: "next",
     items: ["@mentions and notifications inbox", "Time tracking", "File attachments", "Docs linked to tasks", "Goals and OKRs"],
   },
   {
     name: "Automation",
     status: "planned",
-    items: ["Automations (when this happens, do that)", "Recurring tasks", "Workload view", "Whiteboards", "Import from CSV and Jira"],
+    items: ["Automations (when this happens, do that)", "Recurring tasks", "Capacity per sprint", "Whiteboards", "Import from CSV and Jira"],
   },
 ];
 
