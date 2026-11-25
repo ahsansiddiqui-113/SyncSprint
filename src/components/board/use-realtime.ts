@@ -3,7 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClientMessage, OrgEvent, PresenceUser, ServerMessage } from "@/lib/realtime-protocol";
 
-export type ConnectionStatus = "connecting" | "live" | "offline";
+export type ConnectionStatus = "connecting" | "live" | "offline" | "sync";
+
+/**
+ * "ws" (default): instant updates over the custom server's WebSocket.
+ * "poll": for serverless hosts (Vercel) that can't keep WebSockets open — the board
+ * re-syncs from the server every few seconds while the tab is visible.
+ */
+export const REALTIME_MODE = process.env.NEXT_PUBLIC_REALTIME_MODE === "poll" ? "poll" : "ws";
+const POLL_MS = 5_000;
 
 /**
  * Subscribes to the org's WebSocket room. Reconnects with capped exponential
@@ -24,6 +32,20 @@ export function useRealtime(opts: {
   handlers.current = opts;
 
   useEffect(() => {
+    if (REALTIME_MODE !== "poll") return;
+    setStatus("sync");
+    const tick = () => document.visibilityState === "visible" && handlers.current.onResync();
+    const id = setInterval(tick, POLL_MS);
+    const onVisible = () => document.visibilityState === "visible" && handlers.current.onResync();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [opts.organizationId]);
+
+  useEffect(() => {
+    if (REALTIME_MODE === "poll") return;
     let attempt = 0;
     let closedByUs = false;
     let timer: ReturnType<typeof setTimeout> | undefined;

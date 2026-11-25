@@ -115,6 +115,14 @@ describe("client board reducer", () => {
     expect(s.tasks.a!.columnId).toBe("c1");
   });
 
+  it("polling sync merges by version: in-flight local edits survive, deleted tasks disappear", () => {
+    let s1 = initBoard([t("a", 3), t("b", 1)]);
+    s1 = boardReducer(s1, { type: "sync", tasks: [{ ...t("a", 2), title: "stale" }, { ...t("c", 1), title: "new" }] });
+    expect(s1.tasks.a!.title).toBe("a"); // local v3 kept over server v2
+    expect(s1.tasks.b).toBeUndefined(); // deleted on the server
+    expect(s1.tasks.c!.title).toBe("new");
+  });
+
   it("groups by column ordered by fractional position", () => {
     const g = groupByColumn({ a: t("a", 1, "c1", 2048), b: t("b", 1, "c1", 512), c: t("c", 1, "c2") }, ["c1", "c2", "c3"]);
     expect(g).toEqual({ c1: ["b", "a"], c2: ["c"], c3: [] });

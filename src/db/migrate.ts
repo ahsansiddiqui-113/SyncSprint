@@ -18,8 +18,15 @@ export async function runMigrations(db: DB, url = process.env.DATABASE_URL ?? "p
 if (process.argv[1]?.endsWith("migrate.ts")) {
   (async () => {
     await import("dotenv/config");
-    const { db } = await import("./index");
-    await runMigrations(db);
+    const { createDb, closeDb } = await import("./index");
+    // Neon (via Vercel) exposes a direct URL for DDL; pooled URLs are for app traffic.
+    const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL ?? "pglite://./.pglite";
+    if (process.env.VERCEL && !process.env.DATABASE_URL) {
+      console.error("✖ DATABASE_URL is not set for this Vercel deployment.");
+      process.exit(1);
+    }
+    await runMigrations(createDb(url), url);
+    await closeDb();
     console.log("✔ migrations applied");
     process.exit(0);
   })();

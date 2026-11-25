@@ -1,0 +1,10 @@
+# Never upload local secrets, local databases or build output to Vercel.
+.env
+.env.*
+!.env.example
+.pglite*
+.next
+node_modules
+.claude
+coverage
+*.tsbuildinfo

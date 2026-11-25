@@ -172,9 +172,19 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     setTimeout(() => setFlash(({ [id]: _, ...rest }) => rest), 1600);
   };
 
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const resync = useCallback(async () => {
     const res = await getBoardSnapshotAction(org.id, project.id);
-    if (res.ok) dispatch({ type: "reset", tasks: res.tasks });
+    if (res.ok) {
+      // Highlight work changed by someone else since the last sync (polling mode has no events).
+      const before = stateRef.current.tasks;
+      for (const t of res.tasks) {
+        const prev = before[t.id];
+        if (prev && t.version > prev.version && !ownWrites.current.has(`${t.id}:${t.version}`)) flashTask(t.id);
+      }
+      dispatch({ type: "sync", tasks: res.tasks });
+    }
     loadMeta();
     void loadSprints();
   }, [org.id, project.id, loadMeta, loadSprints]);
@@ -592,20 +602,20 @@ function Progress({ done, total }: { done: number; total: number }) {
 }
 
 function LiveDot({ status }: { status: ConnectionStatus }) {
-  const live = status === "live";
+  const live = status === "live" || status === "sync";
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12.5px] font-semibold",
         live ? "bg-emerald-50 text-emerald-700" : "bg-surface-2 text-muted"
       )}
-      title={live ? "Connected to the org's real-time room" : "Reconnecting…"}
+      title={status === "sync" ? "Changes from teammates sync every few seconds" : live ? "Connected — changes appear instantly" : "Reconnecting…"}
     >
       <span className="relative flex h-2 w-2">
         {live && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" />}
         <span className={cn("relative inline-flex h-2 w-2 rounded-full", live ? "bg-emerald-500" : "bg-zinc-400")} />
       </span>
-      {live ? "Live" : status === "connecting" ? "Connecting" : "Offline"}
+      {status === "sync" ? "Auto-sync" : live ? "Live" : status === "connecting" ? "Connecting" : "Offline"}
     </span>
   );
 }
