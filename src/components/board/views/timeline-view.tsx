@@ -14,6 +14,7 @@ import type { TaskPatch, ViewProps } from "./types";
 const ZOOMS = { week: { days: 21, label: "3 weeks" }, month: { days: 42, label: "6 weeks" }, quarter: { days: 91, label: "Quarter" } } as const;
 type Zoom = keyof typeof ZOOMS;
 const ROW = 46;
+const GROUP = 44; // group header height (h-11)
 const LEFT = 340;
 
 type DragState = { taskId: string; mode: "move" | "start" | "end"; originX: number; delta: number };
@@ -118,6 +119,42 @@ export function TimelineView(props: ViewProps & { onPatch: (task: TaskDTO, patch
 
   const todayOffset = diffDays(from, today);
 
+  /* Dependency arrows: rows have fixed heights, so geometry is computed, not measured. */
+  const rowY = new Map<string, number>();
+  {
+    let y = 0;
+    for (const col of props.columns) {
+      y += GROUP;
+      if (collapsed[col.id]) continue;
+      for (const id of grouped[col.id] ?? []) {
+        rowY.set(id, y + ROW / 2);
+        y += ROW;
+      }
+    }
+  }
+  const arrows = props.decor.deps
+    .map((d) => {
+      const a = props.tasks[d.blockerId];
+      const b = props.tasks[d.blockedId];
+      if (!a || !b) return null;
+      const ra = range(a, drag);
+      const rb = range(b, drag);
+      const ya = rowY.get(a.id);
+      const yb = rowY.get(b.id);
+      if (!ra || !rb || ya === undefined || yb === undefined) return null;
+      const x1 = (diffDays(from, ra.end) + 1) * dayW - 2; // end of blocker bar
+      const x2 = diffDays(from, rb.start) * dayW + 2; // start of blocked bar
+      const open = a.columnId !== props.doneColumnId;
+      // Elbow: out to the right, across vertically, then into the blocked bar.
+      const midX = x2 - 10 >= x1 + 10 ? (x1 + x2) / 2 : x1 + 10;
+      const path =
+        x2 - 10 >= x1 + 10
+          ? `M${x1},${ya} H${midX} V${yb} H${x2}`
+          : `M${x1},${ya} H${x1 + 10} V${(ya + yb) / 2} H${x2 - 10} V${yb} H${x2}`;
+      return { key: `${d.blockerId}-${d.blockedId}`, path, open, x2, yb, late: rb.start <= ra.end };
+    })
+    .filter(Boolean) as { key: string; path: string; open: boolean; x2: number; yb: number; late: boolean }[];
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-white">
       {/* toolbar */}
@@ -184,6 +221,20 @@ export function TimelineView(props: ViewProps & { onPatch: (task: TaskDTO, patch
 
           {/* body */}
           <div className="relative">
+            {/* dependency arrows (blocker end → blocked start) */}
+            {arrows.length > 0 && (
+              <svg className="pointer-events-none absolute top-0 z-[5] overflow-visible" style={{ left: LEFT, width: span * dayW, height: "100%" }} aria-hidden>
+                {arrows.map((a) => {
+                  const color = a.open ? (a.late ? "#dc2626" : "#e86a6a") : "#9aa1ab";
+                  return (
+                    <g key={a.key}>
+                      <path d={a.path} fill="none" stroke={color} strokeWidth={1.75} strokeLinejoin="round" strokeDasharray={a.open ? undefined : "4 3"} />
+                      <path d={`M${a.x2},${a.yb} l-6,-4 v8 z`} fill={color} />
+                    </g>
+                  );
+                })}
+              </svg>
+            )}
             {/* weekend shading + today line spanning all rows */}
             <div className="pointer-events-none absolute inset-y-0 z-0" style={{ left: LEFT, right: 0 }}>
               {days.map((d, i) =>

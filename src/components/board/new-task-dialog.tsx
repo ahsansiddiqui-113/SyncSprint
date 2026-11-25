@@ -10,6 +10,8 @@ import { triageTaskAction } from "@/actions/ai.actions";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Sheet } from "./sheet";
+import { PRIORITY_STYLE } from "@/components/ui/badge";
+import { aiSourceLabel } from "@/lib/ai-label";
 import type { BoardCtx } from "./kanban-board";
 
 export function NewTaskDialog({
@@ -94,7 +96,7 @@ export function NewTaskDialog({
             <p className="mt-2 text-xs">
               {triage.rationale}
               {triage.labels.length > 0 && <span className="text-muted"> · labels: {triage.labels.join(", ")}</span>}
-              <span className="text-muted"> · via {triage.provider}</span>
+              <span className="text-muted"> · {aiSourceLabel(triage.provider)}</span>
             </p>
           )}
         </div>
@@ -103,7 +105,7 @@ export function NewTaskDialog({
           <div className="space-y-1">
             <Label htmlFor="n-pri">Priority</Label>
             <Select id="n-pri" value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}>
-              {(["low", "medium", "high", "urgent"] as const).map((p) => <option key={p} value={p}>{p}</option>)}
+              {(["urgent", "high", "medium", "low"] as const).map((p) => <option key={p} value={p}>{PRIORITY_STYLE[p].label}</option>)}
             </Select>
           </div>
           <div className="space-y-1">

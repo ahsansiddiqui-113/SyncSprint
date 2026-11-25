@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { CalendarDays, Clock, Columns3, Hash, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
+import { CalendarDays, Clock, Columns3, Hash, Tag as TagIcon, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
 import type { TaskPriority } from "@/db/schema";
 import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -14,6 +14,9 @@ import { Input, Select, Textarea } from "@/components/ui/input";
 import { PRIORITY_STYLE, PriorityIcon } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { Section, Sheet } from "./sheet";
+import { aiSourceLabel } from "@/lib/ai-label";
+import { ChecklistSection, DependenciesSection, ParentLink, SubtasksSection, TagsField } from "./drawer-breakdown";
+import type { TaskDecor } from "./decor";
 import type { BoardCtx } from "./kanban-board";
 
 type Comment = { id: string; body: string; createdAt: string; authorName: string | null; authorId: string | null };
@@ -43,6 +46,12 @@ export function TaskDrawer(props: {
   onForceTask: (t: TaskDTO) => void;
   onRemoved: (id: string) => void;
   onCreated: (ts: TaskDTO[]) => void;
+  allTasks: Record<string, TaskDTO>;
+  decor: TaskDecor;
+  metaVersion: number;
+  onMetaChanged: () => void;
+  onOpenTask: (id: string) => void;
+  onToggleDone: (t: TaskDTO) => void;
 }) {
   const { ctx, task } = props;
   const canEdit = can(ctx.role, "CREATE_OR_MOVE_TASK");
@@ -108,6 +117,17 @@ export function TaskDrawer(props: {
   }
 
   const ref = `${ctx.project.key}-${task.taskNumber}`;
+  const breakdown = {
+    ctx,
+    task,
+    allTasks: props.allTasks,
+    decor: props.decor,
+    metaVersion: props.metaVersion,
+    onMetaChanged: props.onMetaChanged,
+    onOpenTask: props.onOpenTask,
+    onToggleDone: props.onToggleDone,
+    onCreated: props.onCreated,
+  };
   const column = ctx.columns.find((c) => c.id === task.columnId);
   const reset = () => {
     setBase(task);
@@ -122,9 +142,6 @@ export function TaskDrawer(props: {
           <span className="rounded-md border border-border-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[14px] text-muted">{ref}</span>
           <span className="text-subtle">in</span>
           <span className="font-medium">{column?.title}</span>
-          <span className="ml-1 rounded-full bg-surface-2 px-2 py-0.5 font-mono text-[12.5px] font-normal text-subtle" title="Optimistic-lock version">
-            v{task.version}
-          </span>
         </span>
       }
       footer={
@@ -161,6 +178,7 @@ export function TaskDrawer(props: {
         )
       }
     >
+      <ParentLink ctx={ctx} task={task} allTasks={props.allTasks} onOpenTask={props.onOpenTask} />
       {props.viewers.length > 0 && (
         <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-violet-400/25 bg-violet-400/[0.07] px-3 py-2.5 text-[15px] text-violet-800">
           <div className="flex -space-x-1.5">
@@ -177,8 +195,7 @@ export function TaskDrawer(props: {
         <div className="mb-4 flex gap-3 rounded-xl border border-amber-400/30 bg-amber-400/[0.08] px-3.5 py-3 text-[15px] text-amber-900">
           <GitMerge className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
           <div>
-            A teammate saved this card (v{base.version} → v{task.version}) while you were editing. Saving now will be rejected with{" "}
-            <code className="rounded bg-surface-2 px-1 font-mono text-[13.5px]">VERSION_CONFLICT</code>.
+            A teammate updated this card while you were editing, so your changes can&apos;t be saved over theirs.
             <button className="ml-1 cursor-pointer font-medium text-amber-700 underline underline-offset-2" onClick={reset}>
               Load their version
             </button>
@@ -212,7 +229,7 @@ export function TaskDrawer(props: {
                   draft.priority === p ? PRIORITY_STYLE[p].badge : "border-transparent text-subtle hover:bg-hover hover:text-foreground"
                 )}
               >
-                <PriorityIcon priority={p} className="scale-75" /> {p}
+                <PriorityIcon priority={p} className="scale-75" /> {PRIORITY_STYLE[p].label}
               </button>
             ))}
           </div>
@@ -248,6 +265,9 @@ export function TaskDrawer(props: {
             {datesInvalid && <span className="text-[13px] text-red-600">Start must be on or before due</span>}
           </div>
 
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><TagIcon className="h-3.5 w-3.5" /> Tags</span>
+          <TagsField ctx={ctx} task={task} decor={props.decor} onMetaChanged={props.onMetaChanged} />
+
           <span className="flex items-center gap-2 text-[15px] text-subtle"><Hash className="h-3.5 w-3.5" /> Points</span>
           <div className="flex gap-1">
             {["", "1", "2", "3", "5", "8", "13"].map((n) => (
@@ -273,6 +293,10 @@ export function TaskDrawer(props: {
           <Textarea aria-label="Description" rows={6} value={draft.description} placeholder="Add context, acceptance criteria, links… (markdown)" onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
         </Section>
       </fieldset>
+
+      <SubtasksSection {...breakdown} />
+      <ChecklistSection {...breakdown} />
+      <DependenciesSection {...breakdown} />
 
       {canEdit && (
         <section className="relative mt-7 overflow-hidden rounded-xl border border-primary/25 bg-linear-to-br from-primary/[0.10] via-transparent to-accent/[0.06] p-4">
@@ -310,8 +334,7 @@ export function TaskDrawer(props: {
               </div>
               <div className="mt-3 flex items-center gap-2">
                 <span className="text-[13px] text-subtle">
-                  via <span className="font-mono">{subtasks.provider}</span>
-                  {subtasks.note ? ` · ${subtasks.note}` : ""}
+                  {aiSourceLabel(subtasks.provider, subtasks.note)}
                 </span>
                 <Button
                   size="sm"

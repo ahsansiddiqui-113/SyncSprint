@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8e7cf5"/>
+      <stop offset="0.55" stop-color="#7b68ee"/>
+      <stop offset="1" stop-color="#e44a8a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <!-- SyncSprint mark: chevron (sprint) over a sweep (sync) -->
+  <path d="M10 39l8-6.4c4.2 5.6 8.8 8.2 14 8.2s9.8-2.6 14-8.2l8 6.4c-6 8-13.2 12-22 12s-16-4-22-12z" fill="#ffffff"/>
+  <path d="M32 22.8l-14.4 12.4-6.6-7.8L32 9.6l21 17.8-6.6 7.8z" fill="#ffffff" fill-opacity="0.85"/>
+</svg>

@@ -8,6 +8,7 @@ import { PRIORITY_STYLE, PriorityFlag } from "@/components/ui/badge";
 import { CheckRow, Popover } from "@/components/ui/popover";
 import { activeFilterCount, EMPTY_FILTERS, type Filters } from "./filters";
 import type { Member } from "./kanban-board";
+import type { TagInfo } from "./decor";
 
 const PRIORITIES: TaskPriority[] = ["urgent", "high", "medium", "low"];
 
@@ -34,12 +35,14 @@ export function FilterBar({
   filters,
   onChange,
   members,
+  tags,
   shown,
   total,
 }: {
   filters: Filters;
   onChange: (f: Filters) => void;
   members: Member[];
+  tags: TagInfo[];
   shown: number;
   total: number;
 }) {
@@ -95,6 +98,23 @@ export function FilterBar({
           </CheckRow>
         ))}
       </Popover>
+
+      {tags.length > 0 && (
+        <Popover
+          trigger={() => (
+            <Chip active={filters.tagIds.length > 0}>
+              Tags{filters.tagIds.length ? ` · ${filters.tagIds.length}` : ""} <ChevronDown className="h-3.5 w-3.5" />
+            </Chip>
+          )}
+        >
+          {tags.map((t) => (
+            <CheckRow key={t.id} checked={filters.tagIds.includes(t.id)} onChange={() => set({ tagIds: toggle(filters.tagIds, t.id) })}>
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: t.color }} />
+              <span className="truncate">{t.name}</span>
+            </CheckRow>
+          ))}
+        </Popover>
+      )}
 
       <Chip active={filters.hideDone} onClick={() => set({ hideDone: !filters.hideDone })}>
         <EyeOff className="h-4 w-4" /> Hide done

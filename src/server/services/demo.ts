@@ -3,6 +3,10 @@ import { and, asc, eq, ne } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   auditLogs,
+  checklistItems,
+  tags,
+  taskDependencies,
+  taskTags,
   boardColumns,
   orgMembers,
   organizations,
@@ -155,6 +159,68 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
             metadata: { targetColumnId: t.columnId, newPosition: t.position, version: 1 },
             createdAt: minutesAgo(60 * 24 * Math.max(0, Math.round((13 - i) * 0.6)) + 45),
           })),
+      ]);
+
+      if (p.key === "ENG") await seedBreakdown(created, project!.id, cols);
+    }
+
+    /** Phase 2 sample data: tags, a checklist, subtasks and dependencies on the ENG board. */
+    async function seedBreakdown(eng: (typeof tasks.$inferSelect)[], projectId: string, cols: (typeof boardColumns.$inferSelect)[]) {
+      const byNumber = (n: number) => eng.find((t) => t.taskNumber === n)!;
+      const tagRows = await tx
+        .insert(tags)
+        .values([
+          { organizationId: orgId, name: "Backend", color: "#3f7cb8" },
+          { organizationId: orgId, name: "Frontend", color: "#e44a8a" },
+          { organizationId: orgId, name: "Security", color: "#dd6b00" },
+          { organizationId: orgId, name: "Customer", color: "#0f9d74" },
+        ])
+        .returning();
+      const tag = (name: string) => tagRows.find((t) => t.name === name)!.id;
+      await tx.insert(taskTags).values(
+        (
+          [
+            [1, "Backend"], [1, "Customer"], [2, "Backend"], [4, "Backend"], [5, "Backend"], [5, "Customer"],
+            [6, "Security"], [7, "Frontend"], [8, "Security"], [8, "Backend"], [9, "Security"], [11, "Frontend"],
+          ] as const
+        ).map(([n, name]) => ({ organizationId: orgId, taskId: byNumber(n).id, tagId: tag(name) }))
+      );
+
+      // Checklist on the billing webhook task.
+      const billing = byNumber(1);
+      await tx.insert(checklistItems).values(
+        ["Verify webhook signatures", "Make handler idempotent", "Map Stripe customers to workspaces", "Add retry + dead-letter queue"].map((text, i) => ({
+          organizationId: orgId,
+          taskId: billing.id,
+          text,
+          done: i === 0,
+          position: (i + 1) * POSITION_STEP,
+        }))
+      );
+
+      // Two subtasks under the billing webhook (one already done).
+      const [counter] = await tx
+        .update(projects)
+        .set({ taskCounter: eng.length + 2 })
+        .where(eq(projects.id, projectId))
+        .returning({ n: projects.taskCounter });
+      await tx.insert(tasks).values([
+        {
+          organizationId: orgId, projectId, columnId: cols[cols.length - 1]!.id, parentId: billing.id,
+          taskNumber: counter!.n - 1, title: "Design webhook event schema", priority: "medium", position: 90 * POSITION_STEP,
+          assigneeId: billing.assigneeId, storyPoints: 2, createdAt: minutesAgo(60 * 24 * 6), updatedAt: minutesAgo(60 * 24 * 2),
+        },
+        {
+          organizationId: orgId, projectId, columnId: cols[1]!.id, parentId: billing.id,
+          taskNumber: counter!.n, title: "Handle invoice.paid events", priority: "high", position: 90 * POSITION_STEP,
+          assigneeId: billing.assigneeId, storyPoints: 3, createdAt: minutesAgo(60 * 24 * 5), updatedAt: minutesAgo(60 * 24),
+        },
+      ]);
+
+      // ENG-5 (in progress) blocks ENG-1; ENG-8 (review) blocks ENG-6.
+      await tx.insert(taskDependencies).values([
+        { organizationId: orgId, blockerId: byNumber(5).id, blockedId: billing.id },
+        { organizationId: orgId, blockerId: byNumber(8).id, blockedId: byNumber(6).id },
       ]);
     }
 

@@ -350,7 +350,7 @@ export function DashboardView(props: ViewProps & { organizationId: string; proje
 
         <ChartCard
           title="Created vs completed"
-          subtitle={props.filtered ? "Last 14 days · whole project (filters don't apply)" : "Last 14 days, from the audit log"}
+          subtitle={props.filtered ? "Last 14 days · whole project (filters don't apply)" : "Last 14 days"}
           legend={[
             { label: "Created", color: CREATED },
             { label: "Completed", color: COMPLETED },

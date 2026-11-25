@@ -6,7 +6,7 @@ import { timeAgo, cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { PRIORITY_STYLE, PriorityFlag, StatusPill } from "@/components/ui/badge";
 import { groupByColumn } from "../board-state";
-import { DueChip, PointsBadge } from "../task-meta";
+import { BreakdownBadges, DueChip, ParentRef, PointsBadge } from "../task-meta";
 import type { ViewProps } from "./types";
 
 const GRID = "grid grid-cols-[minmax(0,1fr)_160px_120px_120px_70px_100px_100px]";
@@ -66,7 +66,15 @@ export function ListView(props: ViewProps) {
                       >
                         <span className="flex min-w-0 items-center gap-3">
                           <span className="h-3.5 w-3.5 shrink-0 rounded-full border-2" style={{ borderColor: color, backgroundColor: done ? color : "transparent" }} />
-                          <span className={cn("truncate font-medium", done && "text-muted line-through decoration-black/25")}>{t.title}</span>
+                          <span className="flex min-w-0 flex-col">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className={cn("truncate font-medium", done && "text-muted line-through decoration-black/25")}>{t.title}</span>
+                              <BreakdownBadges taskId={t.id} decor={props.decor} maxTags={2} className="shrink-0 flex-nowrap" />
+                            </span>
+                            {t.parentId && props.allTasks[t.parentId] && (
+                              <ParentRef parent={props.allTasks[t.parentId]} refLabel={props.refOf(props.allTasks[t.parentId]!)} />
+                            )}
+                          </span>
                           {viewers.length > 0 && (
                             <span className="shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[12px] font-semibold text-primary">
                               {viewers[0]!.name.split(" ")[0]} {viewers.some((v) => v.editing) ? "editing…" : "viewing"}

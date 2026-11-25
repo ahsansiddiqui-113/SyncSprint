@@ -101,6 +101,7 @@ export const createTaskInput = z.object({
   startDate: dateSchema.nullish(),
   dueDate: dateSchema.nullish(),
   storyPoints: pointsSchema.nullish(),
+  parentId: z.string().uuid().nullish(),
 });
 
 export async function createTask(conn: DB, actorId: string, raw: z.input<typeof createTaskInput>) {
@@ -110,6 +111,17 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
 
   return conn.transaction(async (tx) => {
     const col = await assertColumnInOrg(tx, input.organizationId, input.columnId);
+    if (input.parentId) {
+      const [parent] = await tx
+        .select({ projectId: tasks.projectId, parentId: tasks.parentId })
+        .from(tasks)
+        .where(and(eq(tasks.id, input.parentId), eq(tasks.organizationId, input.organizationId)))
+        .limit(1);
+      // Another tenant's id looks exactly like a missing one.
+      if (!parent) throw new AppError("NOT_FOUND", "Parent task not found");
+      if (parent.parentId) throw new AppError("VALIDATION", "Subtasks can't have their own subtasks");
+      if (parent.projectId !== col.projectId) throw new AppError("VALIDATION", "A subtask must be in the same project as its parent");
+    }
     await assertAssigneeInOrg(tx, input.organizationId, input.assigneeId);
 
     // Atomic counter → ENG-1, ENG-2… without a MAX()+1 race.
@@ -141,6 +153,7 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
         startDate: input.startDate ?? null,
         dueDate: input.dueDate ?? null,
         storyPoints: input.storyPoints ?? null,
+        parentId: input.parentId ?? null,
         position: (last?.position ?? 0) + POSITION_STEP,
       })
       .returning();
@@ -151,7 +164,7 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
       action: "TASK_CREATED",
       entityType: "task",
       entityId: task!.id,
-      metadata: { ref: `${project.key}-${task!.taskNumber}`, title: task!.title, columnId: input.columnId },
+      metadata: { ref: `${project.key}-${task!.taskNumber}`, title: task!.title, columnId: input.columnId, parentId: input.parentId ?? null },
     });
     return task!;
   });

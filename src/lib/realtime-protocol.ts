@@ -16,6 +16,7 @@ export type TaskDTO = {
   startDate: string | null;
   dueDate: string | null;
   storyPoints: number | null;
+  parentId: string | null;
   updatedAt: string;
   createdAt: string;
 };
@@ -47,6 +48,8 @@ export type OrgEvent =
   | { type: "TASK_DELETED"; actor: Actor; taskId: string; projectId: string }
   | { type: "COLUMN_REBALANCED"; columnId: string; positions: Record<string, number> }
   | { type: "COMMENT_ADDED"; actor: Actor; taskId: string; commentId: string }
+  /** Checklist / tag / dependency changes: clients refetch the project's meta. */
+  | { type: "TASK_META_CHANGED"; actor: Actor; projectId: string; taskIds: string[]; kind: "checklist" | "tags" | "dependencies" }
   | { type: "MEMBERSHIP_CHANGED"; actor: Actor; userId: string; role: OrgRole | null };
 
 export type ServerMessage =

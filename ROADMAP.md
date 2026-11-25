@@ -16,7 +16,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
 - ✅ Activity / audit log with filters
 - ✅ AI: subtask breakdown, triage, standup digest, conflict explainer
 
-## Phase 1 — Planning & visualization 🚧
+## Phase 1 — Planning & visualization ✅
 - ✅ Task **start date**, **due date**, **story points** (sizing, like Azure Boards "effort")
 - ✅ Overdue / due-soon indicators on cards and rows
 - ✅ **Search + filter bar** (text, assignee, priority, "me", hide done), shared by every view
@@ -25,12 +25,13 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
 - ✅ **Dashboard view**: KPIs, status/priority breakdown, workload by assignee, points, 14-day activity
 - ✅ View is kept in the URL (`?view=calendar`) so links are shareable
 
-## Phase 2 — Work breakdown
-- ⬜ True **subtasks** (parent/child) with roll-up progress on the parent card
-- ⬜ **Checklists** inside tasks
-- ⬜ **Tags/labels** with colors, filterable
-- ⬜ Multiple assignees, watchers
-- ⬜ Task relationships: blocks / blocked by / related (dependency arrows on the Timeline)
+## Phase 2 — Work breakdown ✅
+- ✅ **Subtasks** (one level deep, same project) with roll-up progress on the parent card
+- ✅ **Checklists** inside tasks, with progress on cards
+- ✅ **Tags** (workspace-wide, case-insensitive, colored) with a tag filter
+- ✅ **Dependencies**: blocked by / blocking, cycle prevention, "Blocked" badges
+- ✅ **Dependency arrows** on the Timeline (red when the blocked task starts before its blocker ends)
+- ↪ Multiple assignees and watchers moved to Phase 4 (they change the core task model)
 
 ## Phase 3 — Sprints & Agile (Azure Boards style)
 - ⬜ **Sprints / iterations** with start–end dates and capacity
@@ -44,6 +45,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
 - ⬜ **Custom fields** (text, number, dropdown, date, people)
 - ⬜ Table view (spreadsheet-like inline editing)
 - ⬜ Saved views and filters per user, with group-by and sort options
+- ⬜ Multiple assignees, watchers
 
 ## Phase 5 — Collaboration & productivity
 - ⬜ @mentions + in-app notifications inbox

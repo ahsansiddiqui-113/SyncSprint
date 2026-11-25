@@ -15,6 +15,13 @@
       "when": 1795631394539,
       "tag": "0001_planning_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795632611597,
+      "tag": "0002_work_breakdown",
+      "breakpoints": true
     }
   ]
 }

@@ -57,7 +57,7 @@ export default async function ActivityPage({
       <PageHeader
         eyebrow={org.name}
         title="Activity"
-        description="Append-only audit trail. Every row is written in the same database transaction as the change it records."
+        description="Everything that happened in this workspace, newest first."
         actions={<ActivityFilters
           members={members.map((m) => ({ id: m.userId, name: m.name }))}
           actions={[...AUDIT_ACTIONS]}

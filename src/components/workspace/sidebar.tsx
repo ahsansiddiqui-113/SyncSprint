@@ -131,7 +131,7 @@ export function Sidebar({
                     start(async () => {
                       const res = await switchDemoRoleAction(org.id, r);
                       if (!res.ok) return void toast.error(res.message);
-                      toast.success(`You are now ${r}`, { description: "The server enforces it on every action." });
+                      toast.success(`You are now ${r}`, { description: "Permissions updated." });
                       router.refresh();
                     })
                   }
@@ -144,7 +144,7 @@ export function Sidebar({
                 </button>
               ))}
             </div>
-            <p className="mt-2 text-[12.5px] leading-snug text-muted">Rewrites your real membership row — RBAC is still enforced server-side.</p>
+            <p className="mt-2 text-[12.5px] leading-snug text-muted">Preview what each role can see and do in this workspace.</p>
           </div>
         )}
 

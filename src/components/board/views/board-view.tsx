@@ -23,7 +23,8 @@ import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { PRIORITY_STYLE, PriorityFlag, StatusPill } from "@/components/ui/badge";
 import { groupByColumn } from "../board-state";
-import { DueChip, PointsBadge } from "../task-meta";
+import { BreakdownBadges, DueChip, ParentRef, PointsBadge } from "../task-meta";
+import type { TaskDecor } from "../decor";
 import type { Column, Member } from "../kanban-board";
 import type { ViewProps } from "./types";
 
@@ -90,6 +91,10 @@ export function BoardView(props: ViewProps & { projectId: string; onMove: (task:
   }
 
   const activeTask = activeId ? tasks[activeId] : null;
+  const parentOf = (t: TaskDTO) => {
+    const p = t.parentId ? props.allTasks[t.parentId] : undefined;
+    return p ? { ref: props.refOf(p), title: p.title } : undefined;
+  };
   return (
     <DndContext
       id={`board-${props.projectId}`}
@@ -128,6 +133,8 @@ export function BoardView(props: ViewProps & { projectId: string; onMove: (task:
                     viewers={props.presenceByTask.get(id) ?? []}
                     flash={!!props.flash[id]}
                     onOpen={() => props.onOpen(id)}
+                    decor={props.decor}
+                    parent={parentOf(t)}
                   />
                 );
               })}
@@ -143,6 +150,8 @@ export function BoardView(props: ViewProps & { projectId: string; onMove: (task:
             assignee={activeTask.assigneeId ? props.memberById.get(activeTask.assigneeId) : undefined}
             viewers={[]}
             done={activeTask.columnId === props.doneColumnId}
+            decor={props.decor}
+            parent={parentOf(activeTask)}
             className="rotate-[2deg] cursor-grabbing shadow-glow"
           />
         )}
@@ -205,6 +214,8 @@ function BoardColumn({
 function SortableCard(props: {
   task: TaskDTO;
   refLabel: string;
+  decor: TaskDecor;
+  parent?: { ref: string; title: string };
   disabled: boolean;
   done: boolean;
   assignee?: Member;
@@ -243,9 +254,13 @@ export function CardBody({
   viewers,
   done,
   className,
+  decor,
+  parent,
 }: {
   task: TaskDTO;
   refLabel: string;
+  decor?: TaskDecor;
+  parent?: { ref: string; title: string };
   assignee?: Member;
   viewers: PresenceUser[];
   done?: boolean;
@@ -271,7 +286,9 @@ export function CardBody({
           </span>
         )}
       </div>
+      {parent && <ParentRef parent={parent} refLabel={parent.ref} className="mt-1 w-full" />}
       <p className={cn("mt-1.5 text-[16px] font-medium leading-snug text-foreground", done && "text-muted line-through decoration-black/25")}>{task.title}</p>
+      {decor && <BreakdownBadges taskId={task.id} decor={decor} className="mt-2" />}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {assignee ? (
           <Avatar id={assignee.id} name={assignee.name} src={assignee.avatarUrl} size={26} />

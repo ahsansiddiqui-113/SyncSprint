@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils";
 import { explainConflictAction } from "@/actions/ai.actions";
 import { getBoardSnapshotAction, moveTaskAction, updateTaskAction } from "@/actions/task.actions";
 import { simulateTeammateAction } from "@/actions/demo.actions";
+import { getProjectMetaAction } from "@/actions/breakdown.actions";
+import type { ProjectMeta } from "@/server/services/breakdown";
+import { POSITION_STEP } from "@/lib/fractional-index";
 import { Avatar } from "@/components/ui/avatar";
 import { DONE_COLOR, statusColor } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +24,7 @@ import { NewTaskDialog } from "./new-task-dialog";
 import { DigestPanel } from "./digest-panel";
 import { FilterBar } from "./filter-bar";
 import { applyFilters, EMPTY_FILTERS, type Filters } from "./filters";
+import { buildDecor, EMPTY_META } from "./decor";
 import { BoardView } from "./views/board-view";
 import { ListView } from "./views/list-view";
 import { CalendarView } from "./views/calendar-view";
@@ -68,6 +72,9 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const [commentsVersion, setCommentsVersion] = useState(0);
   const [newTask, setNewTask] = useState<{ columnId?: string; dueDate?: string } | null>(null);
   const [showDigest, setShowDigest] = useState(false);
+  const [meta, setMeta] = useState<ProjectMeta>(EMPTY_META);
+  /** Bumped whenever meta reloads, so an open drawer refetches its checklist. */
+  const [metaVersion, setMetaVersion] = useState(0);
   const [simPending, startSim] = useTransition();
   /** `${taskId}:${version}` of writes this tab made, to tell our own echoes from another tab's. */
   const ownWrites = useRef(new Set<string>());
@@ -78,9 +85,30 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
   const refOf = useCallback((t: { taskNumber: number }) => `${project.key}-${t.taskNumber}`, [project.key]);
   const visible = useMemo(
-    () => applyFilters(state.tasks, filters, { meId: me.id, doneColumnId, refOf }),
-    [state.tasks, filters, me.id, doneColumnId, refOf]
+    () => applyFilters(state.tasks, filters, { meId: me.id, doneColumnId, refOf, tagsByTask: meta.tagsByTask }),
+    [state.tasks, filters, me.id, doneColumnId, refOf, meta.tagsByTask]
   );
+  const decor = useMemo(() => buildDecor(state.tasks, meta, doneColumnId), [state.tasks, meta, doneColumnId]);
+
+  /* Project meta (checklists, tags, dependencies): load once, then debounce refreshes. */
+  const metaTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const loadMeta = useCallback(
+    (delay = 0) => {
+      clearTimeout(metaTimer.current);
+      metaTimer.current = setTimeout(async () => {
+        const r = await getProjectMetaAction(org.id, project.id);
+        if (r.ok) {
+          setMeta(r.meta);
+          setMetaVersion((v) => v + 1);
+        }
+      }, delay);
+    },
+    [org.id, project.id]
+  );
+  useEffect(() => {
+    loadMeta();
+    return () => clearTimeout(metaTimer.current);
+  }, [loadMeta]);
 
   /** Keep the view in the URL (shareable, survives refresh) without a navigation. */
   const setView = (v: ViewId) => {
@@ -99,7 +127,8 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const resync = useCallback(async () => {
     const res = await getBoardSnapshotAction(org.id, project.id);
     if (res.ok) dispatch({ type: "reset", tasks: res.tasks });
-  }, [org.id, project.id]);
+    loadMeta();
+  }, [org.id, project.id, loadMeta]);
 
   /* ----------------------------- realtime ----------------------------- */
   const onEvent = useCallback(
@@ -125,6 +154,12 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           if (e.projectId !== project.id) return;
           dispatch({ type: "remove", taskId: e.taskId });
           if (openTaskId === e.taskId) setOpenTaskId(null);
+          loadMeta(250); // the cascade removed its checklist, tags and dependencies
+          return;
+        case "TASK_META_CHANGED":
+          if (e.projectId !== project.id) return;
+          loadMeta(250);
+          if (e.actor.id !== me.id) e.taskIds.forEach(flashTask);
           return;
         case "COLUMN_REBALANCED":
           dispatch({ type: "rebalance", positions: e.positions });
@@ -137,7 +172,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           return;
       }
     },
-    [project.id, me.id, openTaskId, colTitle, refOf, router]
+    [project.id, me.id, openTaskId, colTitle, refOf, router, loadMeta]
   );
 
   const { status, presence, connectionId, sendPresence } = useRealtime({ organizationId: org.id, onEvent, onResync: resync });
@@ -174,12 +209,22 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     const res = await moveTaskAction({ organizationId: org.id, taskId: task.id, targetColumnId: columnId, newPosition: position, expectedVersion: task.version });
     if (!res.ok) {
       dispatch({ type: "force", task });
-      toast.error(res.code.startsWith("FORBIDDEN") ? `Not allowed: your role can't move tasks (${res.code})` : res.message);
+      toast.error(res.code.startsWith("FORBIDDEN") ? "Your role doesn't allow moving tasks." : res.message);
       return;
     }
     if (res.conflict) return handleConflict(task, res.current);
     dispatch({ type: "server", task: res.task });
     if (res.rebalanced) dispatch({ type: "rebalance", positions: res.rebalanced });
+  }
+
+  /** Complete <-> reopen: moves the task to the end of the done (or first) column. */
+  function toggleDone(task: TaskDTO) {
+    const target = task.columnId === doneColumnId ? columns[0]?.id : doneColumnId;
+    if (!target) return;
+    const last = Object.values(state.tasks)
+      .filter((t) => t.columnId === target && t.id !== task.id)
+      .reduce((m, t) => Math.max(m, t.position), 0);
+    void commitMove(task, target, last + POSITION_STEP);
   }
 
   /** Same contract for field edits made directly in a view (calendar/timeline). */
@@ -215,6 +260,8 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     canEdit,
     onOpen: setOpenTaskId,
     onAdd: (opts) => setNewTask(opts ?? {}),
+    decor,
+    allTasks: state.tasks,
   };
 
   return (
@@ -291,12 +338,12 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
         </nav>
       </header>
 
-      <FilterBar filters={filters} onChange={setFilters} members={members} shown={Object.keys(visible).length} total={all.length} />
+      <FilterBar filters={filters} onChange={setFilters} members={members} tags={decor.tags} shown={Object.keys(visible).length} total={all.length} />
 
       {!canEdit && (
         <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-8 py-2.5 text-[15px] text-amber-800">
           <Eye className="h-4 w-4" />
-          Read-only — you are a <b className="font-semibold">viewer</b>. The server rejects viewer mutations regardless of what the UI allows.
+          You have view-only access to this project as a <b className="font-semibold">viewer</b>.
         </div>
       )}
 
@@ -313,6 +360,12 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           task={openTask}
           viewers={presenceByTask.get(openTask.id) ?? []}
           commentsVersion={commentsVersion}
+          allTasks={state.tasks}
+          decor={decor}
+          metaVersion={metaVersion}
+          onMetaChanged={() => loadMeta()}
+          onOpenTask={setOpenTaskId}
+          onToggleDone={toggleDone}
           onClose={() => {
             setOpenTaskId(null);
             setEditing(false);

@@ -13,7 +13,10 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const orgRoleEnum = pgEnum("org_role", ["owner", "admin", "member", "viewer"]);
 export const taskPriorityEnum = pgEnum("task_priority", ["low", "medium", "high", "urgent"]);
@@ -204,6 +207,8 @@ export const tasks = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    // Subtasks: one level deep (a subtask cannot have subtasks), same project as the parent.
+    parentId: uuid("parent_id").references((): AnyPgColumn => tasks.id, { onDelete: "cascade" }),
     columnId: uuid("column_id")
       .notNull()
       .references(() => boardColumns.id, { onDelete: "cascade" }),
@@ -226,6 +231,79 @@ export const tasks = pgTable(
     index("tasks_column_pos_idx").on(t.columnId, t.position),
     uniqueIndex("tasks_project_number_idx").on(t.projectId, t.taskNumber),
     index("tasks_org_due_idx").on(t.organizationId, t.dueDate),
+    index("tasks_parent_idx").on(t.parentId),
+  ]
+);
+
+// 7b. Checklist items (lightweight to-dos inside a task; not tasks themselves)
+export const checklistItems = pgTable(
+  "checklist_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    text: varchar("text", { length: 300 }).notNull(),
+    done: boolean("done").default(false).notNull(),
+    position: doublePrecision("position").notNull(),
+    ...timestamps,
+  },
+  (t) => [index("checklist_task_idx").on(t.organizationId, t.taskId, t.position)]
+);
+
+// 7c. Tags (workspace-wide labels) and the task<->tag join
+export const tags = pgTable(
+  "tags",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 40 }).notNull(),
+    color: varchar("color", { length: 7 }).notNull(),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("tags_org_name_idx").on(t.organizationId, t.name)]
+);
+
+export const taskTags = pgTable(
+  "task_tags",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    tagId: uuid("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.tagId] }), index("task_tags_org_idx").on(t.organizationId, t.tagId)]
+);
+
+// 7d. Dependencies: `blocker` must finish before `blocked` can proceed
+export const taskDependencies = pgTable(
+  "task_dependencies",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    blockerId: uuid("blocker_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    blockedId: uuid("blocked_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    ...timestamps,
+  },
+  (t) => [
+    primaryKey({ columns: [t.blockerId, t.blockedId] }),
+    index("deps_org_blocked_idx").on(t.organizationId, t.blockedId),
+    check("deps_no_self", sql`${t.blockerId} <> ${t.blockedId}`),
   ]
 );
 
@@ -290,3 +368,5 @@ export type Task = typeof tasks.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type OrgRole = (typeof orgRoleEnum.enumValues)[number];
 export type TaskPriority = (typeof taskPriorityEnum.enumValues)[number];
+export type ChecklistItem = typeof checklistItems.$inferSelect;
+export type Tag = typeof tags.$inferSelect;
