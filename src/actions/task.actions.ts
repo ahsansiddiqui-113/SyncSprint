@@ -9,16 +9,37 @@ import { requireActor } from "@/lib/session";
 import { toTaskDTO } from "@/lib/realtime-protocol";
 import { broadcastOrgEvent } from "@/server/realtime-hub";
 import * as svc from "@/server/services/tasks";
+import { capacityWarnings, type CapacityWarning } from "@/server/services/capacity";
+import { taskAssignees } from "@/db/schema";
+
+/**
+ * Advisory only: the change is already saved. Computed for everyone assigned to
+ * the task over the dates it occupies (or this week when it has none).
+ */
+async function warningsForTask(organizationId: string, task: { id: string; assigneeId: string | null; startDate: string | null; dueDate: string | null }, today?: string): Promise<CapacityWarning[]> {
+  const co = await db.select({ userId: taskAssignees.userId }).from(taskAssignees).where(eq(taskAssignees.taskId, task.id));
+  const people = [...(task.assigneeId ? [task.assigneeId] : []), ...co.map((c) => c.userId)];
+  if (!people.length) return [];
+  try {
+    return await capacityWarnings(db, organizationId, people, task, today);
+  } catch (err) {
+    console.error("[capacity] warning check failed", err); // never let advice break a save
+    return [];
+  }
+}
+
+const CAPACITY_FIELDS = ["assigneeId", "estimateHours", "startDate", "dueDate"];
 
 /** Note: there is no `userId` in any payload — the actor always comes from the session. */
 
-export async function createTaskAction(input: Parameters<typeof svc.createTask>[2]) {
+export async function createTaskAction(input: Parameters<typeof svc.createTask>[2], today?: string) {
   return toResult(async () => {
     const actor = await requireActor();
     const task = await svc.createTask(db, actor.id, input);
     const dto = toTaskDTO(task);
     broadcastOrgEvent(task.organizationId, { type: "TASK_CREATED", actor, task: dto });
-    return { task: dto };
+    const warnings = task.assigneeId && task.estimateHours ? await warningsForTask(task.organizationId, task, today) : [];
+    return { task: dto, warnings };
   });
 }
 
@@ -45,14 +66,15 @@ export async function moveTaskAction(input: {
   });
 }
 
-export async function updateTaskAction(input: Parameters<typeof svc.updateTask>[2]) {
+export async function updateTaskAction(input: Parameters<typeof svc.updateTask>[2], today?: string) {
   return toResult(async () => {
     const actor = await requireActor();
     const res = await svc.updateTask(db, actor.id, input);
     if (!res.ok) return { conflict: true as const, current: res.current ? toTaskDTO(res.current) : null };
     const task = toTaskDTO(res.task);
     broadcastOrgEvent(input.organizationId, { type: "TASK_UPDATED", actor, task, action: "edited", changes: res.changes });
-    return { conflict: false as const, task };
+    const warnings = res.changes.some((c) => CAPACITY_FIELDS.includes(c)) ? await warningsForTask(input.organizationId, res.task, today) : [];
+    return { conflict: false as const, task, warnings };
   });
 }
 
@@ -93,5 +115,13 @@ export async function getBoardSnapshotAction(organizationId: string, projectId: 
       .from(tasks)
       .where(and(eq(tasks.organizationId, organizationId), eq(tasks.projectId, projectId)));
     return { tasks: rows.map(toTaskDTO) };
+  });
+}
+
+export async function projectFlowSeriesAction(organizationId: string, projectId: string, days: number) {
+  return toResult(async () => {
+    const actor = await requireActor();
+    const { projectFlowSeries } = await import("@/server/services/workspace");
+    return { series: await projectFlowSeries(db, actor.id, organizationId, projectId, days) };
   });
 }

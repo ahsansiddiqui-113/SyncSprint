@@ -2,11 +2,17 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Clock, Columns3, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
+import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, SlidersHorizontal, Tag as TagIcon, Timer, Users, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
 import type { TaskPriority } from "@/db/schema";
 import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
 import { cn, timeAgo } from "@/lib/utils";
+import { todayISO } from "@/lib/dates";
+import { Fragment } from "react";
+import type { ProjectMeta } from "@/server/services/breakdown";
+import type { CapacityWarning } from "@/server/services/capacity";
+import { FieldEditor, loadHint, type WeekLoad } from "./views/table-view";
+import { CapacityNote, CoAssignees, WatchButton } from "./drawer-people";
 import { addCommentAction, deleteTaskAction, listCommentsAction, updateTaskAction } from "@/actions/task.actions";
 import { createSubtasksAction, decomposeTaskAction, explainConflictAction } from "@/actions/ai.actions";
 import { Button } from "@/components/ui/button";
@@ -14,9 +20,30 @@ import { Input, Select, Textarea } from "@/components/ui/input";
 import { PRIORITY_STYLE, PriorityIcon } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { Section, Sheet } from "./sheet";
+import { aiSourceLabel } from "@/lib/ai-label";
+import { ChecklistSection, DependenciesSection, ParentLink, SubtasksSection, TagsField } from "./drawer-breakdown";
+import type { TaskDecor } from "./decor";
+import type { SprintDTO } from "@/server/services/sprints";
+import { TYPE_META, TypeIcon, WORK_ITEM_TYPES } from "./task-meta";
 import type { BoardCtx } from "./kanban-board";
 
 type Comment = { id: string; body: string; createdAt: string; authorName: string | null; authorId: string | null };
+/** Editable form state; empty string = "no value" for optional fields. */
+function draftFrom(t: TaskDTO) {
+  return {
+    title: t.title,
+    description: t.description ?? "",
+    priority: t.priority,
+    assigneeId: t.assigneeId ?? "",
+    startDate: t.startDate ?? "",
+    dueDate: t.dueDate ?? "",
+    storyPoints: t.storyPoints === null ? "" : String(t.storyPoints),
+    type: t.type,
+    sprintId: t.sprintId ?? "",
+    estimateHours: t.estimateHours === null ? "" : String(t.estimateHours),
+  };
+}
+
 type Subtask = { title: string; priority: TaskPriority; estimatedPoints: number };
 
 export function TaskDrawer(props: {
@@ -30,12 +57,23 @@ export function TaskDrawer(props: {
   onForceTask: (t: TaskDTO) => void;
   onRemoved: (id: string) => void;
   onCreated: (ts: TaskDTO[]) => void;
+  allTasks: Record<string, TaskDTO>;
+  decor: TaskDecor;
+  metaVersion: number;
+  onMetaChanged: () => void;
+  onOpenTask: (id: string) => void;
+  onToggleDone: (t: TaskDTO) => void;
+  sprints: SprintDTO[];
+  meta: ProjectMeta;
+  weekLoad: WeekLoad;
+  onWarnings: (w: CapacityWarning[] | undefined) => void;
+  onFieldValue: (taskId: string, fieldId: string, value: string | number | null) => void;
 }) {
   const { ctx, task } = props;
   const canEdit = can(ctx.role, "CREATE_OR_MOVE_TASK");
   // Edits are made against the version we started from (`base`), not the live one.
   const [base, setBase] = useState(task);
-  const [draft, setDraft] = useState({ title: task.title, description: task.description ?? "", priority: task.priority, assigneeId: task.assigneeId ?? "" });
+  const [draft, setDraft] = useState(draftFrom(task));
   const [pending, start] = useTransition();
   const [comments, setComments] = useState<Comment[]>([]);
   const [comment, setComment] = useState("");
@@ -46,7 +84,14 @@ export function TaskDrawer(props: {
     draft.title !== base.title ||
     draft.description !== (base.description ?? "") ||
     draft.priority !== base.priority ||
-    draft.assigneeId !== (base.assigneeId ?? "");
+    draft.assigneeId !== (base.assigneeId ?? "") ||
+    draft.startDate !== (base.startDate ?? "") ||
+    draft.dueDate !== (base.dueDate ?? "") ||
+    draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints)) ||
+    draft.type !== base.type ||
+    draft.sprintId !== (base.sprintId ?? "") ||
+    draft.estimateHours !== (base.estimateHours === null ? "" : String(base.estimateHours));
+  const datesInvalid = !!draft.startDate && !!draft.dueDate && draft.startDate > draft.dueDate;
   const remoteChanged = task.version > base.version;
 
   useEffect(() => props.onEditingChange(dirty), [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -55,7 +100,7 @@ export function TaskDrawer(props: {
   useEffect(() => {
     if (!dirty && remoteChanged) {
       setBase(task);
-      setDraft({ title: task.title, description: task.description ?? "", priority: task.priority, assigneeId: task.assigneeId ?? "" });
+      setDraft(draftFrom(task));
     }
   }, [task, dirty, remoteChanged]);
 
@@ -70,7 +115,15 @@ export function TaskDrawer(props: {
       if (draft.description !== (base.description ?? "")) patch.description = draft.description || null;
       if (draft.priority !== base.priority) patch.priority = draft.priority;
       if (draft.assigneeId !== (base.assigneeId ?? "")) patch.assigneeId = draft.assigneeId || null;
-      const res = await updateTaskAction({ organizationId: ctx.org.id, taskId: task.id, expectedVersion: base.version, patch });
+      if (draft.startDate !== (base.startDate ?? "")) patch.startDate = draft.startDate || null;
+      if (draft.dueDate !== (base.dueDate ?? "")) patch.dueDate = draft.dueDate || null;
+      if (draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints))) patch.storyPoints = draft.storyPoints === "" ? null : Number(draft.storyPoints);
+      if (draft.type !== base.type) patch.type = draft.type;
+      if (draft.sprintId !== (base.sprintId ?? "")) patch.sprintId = draft.sprintId || null;
+      if (draft.estimateHours !== (base.estimateHours === null ? "" : String(base.estimateHours))) {
+        patch.estimateHours = draft.estimateHours === "" ? null : Math.round(Number(draft.estimateHours) * 4) / 4;
+      }
+      const res = await updateTaskAction({ organizationId: ctx.org.id, taskId: task.id, expectedVersion: base.version, patch }, todayISO());
       if (!res.ok) return void toast.error(res.message);
       if (res.conflict) {
         if (res.current) {
@@ -82,16 +135,28 @@ export function TaskDrawer(props: {
         return;
       }
       props.onServerTask(res.task);
+      props.onWarnings(res.warnings);
       setBase(res.task);
       toast.success("Saved");
     });
   }
 
   const ref = `${ctx.project.key}-${task.taskNumber}`;
+  const breakdown = {
+    ctx,
+    task,
+    allTasks: props.allTasks,
+    decor: props.decor,
+    metaVersion: props.metaVersion,
+    onMetaChanged: props.onMetaChanged,
+    onOpenTask: props.onOpenTask,
+    onToggleDone: props.onToggleDone,
+    onCreated: props.onCreated,
+  };
   const column = ctx.columns.find((c) => c.id === task.columnId);
   const reset = () => {
     setBase(task);
-    setDraft({ title: task.title, description: task.description ?? "", priority: task.priority, assigneeId: task.assigneeId ?? "" });
+    setDraft(draftFrom(task));
   };
 
   return (
@@ -102,9 +167,7 @@ export function TaskDrawer(props: {
           <span className="rounded-md border border-border-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[14px] text-muted">{ref}</span>
           <span className="text-subtle">in</span>
           <span className="font-medium">{column?.title}</span>
-          <span className="ml-1 rounded-full bg-surface-2 px-2 py-0.5 font-mono text-[12.5px] font-normal text-subtle" title="Optimistic-lock version">
-            v{task.version}
-          </span>
+          <WatchButton ctx={ctx} task={task} watchers={props.meta.watchers[task.id] ?? []} onChanged={props.onMetaChanged} />
         </span>
       }
       footer={
@@ -132,7 +195,7 @@ export function TaskDrawer(props: {
                 Discard
               </Button>
             )}
-            <Button size="sm" onClick={save} disabled={!dirty || pending}>
+            <Button size="sm" onClick={save} disabled={!dirty || pending || datesInvalid}>
               {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Save changes
             </Button>
           </div>
@@ -141,6 +204,7 @@ export function TaskDrawer(props: {
         )
       }
     >
+      <ParentLink ctx={ctx} task={task} allTasks={props.allTasks} onOpenTask={props.onOpenTask} />
       {props.viewers.length > 0 && (
         <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-violet-400/25 bg-violet-400/[0.07] px-3 py-2.5 text-[15px] text-violet-800">
           <div className="flex -space-x-1.5">
@@ -157,8 +221,7 @@ export function TaskDrawer(props: {
         <div className="mb-4 flex gap-3 rounded-xl border border-amber-400/30 bg-amber-400/[0.08] px-3.5 py-3 text-[15px] text-amber-900">
           <GitMerge className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
           <div>
-            A teammate saved this card (v{base.version} → v{task.version}) while you were editing. Saving now will be rejected with{" "}
-            <code className="rounded bg-surface-2 px-1 font-mono text-[13.5px]">VERSION_CONFLICT</code>.
+            A teammate updated this card while you were editing, so your changes can&apos;t be saved over theirs.
             <button className="ml-1 cursor-pointer font-medium text-amber-700 underline underline-offset-2" onClick={reset}>
               Load their version
             </button>
@@ -177,6 +240,40 @@ export function TaskDrawer(props: {
         />
 
         <div className="mt-4 grid grid-cols-[110px_1fr] items-center gap-x-3 gap-y-2.5 rounded-xl border border-border bg-surface-2 p-3.5 text-sm">
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Shapes className="h-3.5 w-3.5" /> Type</span>
+          <div className="flex flex-wrap gap-1">
+            {WORK_ITEM_TYPES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setDraft({ ...draft, type: t })}
+                className={cn(
+                  "flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[14px] transition-colors disabled:cursor-default",
+                  draft.type === t ? "border-primary/40 bg-primary-soft text-foreground" : "border-transparent text-subtle hover:bg-hover hover:text-foreground"
+                )}
+              >
+                <TypeIcon type={t} size={16} /> {TYPE_META[t].label}
+              </button>
+            ))}
+          </div>
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Rocket className="h-3.5 w-3.5" /> Sprint</span>
+          <Select
+            aria-label="Sprint"
+            className="h-8 max-w-60 border-transparent bg-transparent px-1.5 hover:border-border-strong"
+            value={draft.sprintId}
+            onChange={(e) => setDraft({ ...draft, sprintId: e.target.value })}
+          >
+            <option value="">Backlog</option>
+            {props.sprints
+              .filter((s) => s.status !== "completed" || s.id === base.sprintId)
+              .map((s) => (
+                <option key={s.id} value={s.id} disabled={s.status === "completed"}>
+                  {s.name}{s.status === "active" ? " (active)" : s.status === "completed" ? " (completed)" : ""}
+                </option>
+              ))}
+          </Select>
+
           <span className="flex items-center gap-2 text-[15px] text-subtle"><Columns3 className="h-3.5 w-3.5" /> Status</span>
           <span className="text-[15px] font-medium">{column?.title}</span>
 
@@ -192,7 +289,7 @@ export function TaskDrawer(props: {
                   draft.priority === p ? PRIORITY_STYLE[p].badge : "border-transparent text-subtle hover:bg-hover hover:text-foreground"
                 )}
               >
-                <PriorityIcon priority={p} className="scale-75" /> {p}
+                <PriorityIcon priority={p} className="scale-75" /> {PRIORITY_STYLE[p].label}
               </button>
             ))}
           </div>
@@ -200,8 +297,82 @@ export function TaskDrawer(props: {
           <span className="flex items-center gap-2 text-[15px] text-subtle"><UserRound className="h-3.5 w-3.5" /> Assignee</span>
           <Select aria-label="Assignee" className="h-8 max-w-60 border-transparent bg-transparent px-1.5 hover:border-border-strong" value={draft.assigneeId} onChange={(e) => setDraft({ ...draft, assigneeId: e.target.value })}>
             <option value="">Unassigned</option>
-            {ctx.members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {ctx.members.map((m) => <option key={m.id} value={m.id}>{m.name}{loadHint(m.id, props.weekLoad)}</option>)}
           </Select>
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Users className="h-3.5 w-3.5" /> Also assigned</span>
+          <CoAssignees
+            ctx={ctx}
+            task={task}
+            primary={draft.assigneeId || null}
+            current={props.meta.coAssignees[task.id] ?? []}
+            weekLoad={props.weekLoad}
+            disabled={!canEdit}
+            onChanged={props.onMetaChanged}
+            onWarnings={props.onWarnings}
+          />
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Timer className="h-3.5 w-3.5" /> Estimate</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              aria-label="Time estimate in hours"
+              min={0}
+              max={1000}
+              step={0.25}
+              value={draft.estimateHours}
+              placeholder="—"
+              onChange={(e) => setDraft({ ...draft, estimateHours: e.target.value })}
+              className="h-8 w-24 rounded-md border border-border bg-white px-2 text-right text-[14px] tabular-nums outline-none hover:border-border-strong focus:border-primary disabled:bg-transparent"
+            />
+            <span className="text-[14px] text-subtle">hours</span>
+            <CapacityNote ctx={ctx} assigneeId={draft.assigneeId} draftEstimate={Number(draft.estimateHours) || 0} savedEstimate={base.estimateHours ?? 0} savedAssignee={base.assigneeId} weekLoad={props.weekLoad} />
+          </div>
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><CalendarDays className="h-3.5 w-3.5" /> Dates</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="date"
+              aria-label="Start date"
+              value={draft.startDate}
+              max={draft.dueDate || undefined}
+              onChange={(e) => setDraft({ ...draft, startDate: e.target.value })}
+              className="h-8 rounded-md border border-border bg-white px-2 text-[14px] outline-none hover:border-border-strong focus:border-primary disabled:bg-transparent"
+            />
+            <span className="text-subtle">→</span>
+            <input
+              type="date"
+              aria-label="Due date"
+              value={draft.dueDate}
+              min={draft.startDate || undefined}
+              onChange={(e) => setDraft({ ...draft, dueDate: e.target.value })}
+              className={cn(
+                "h-8 rounded-md border bg-white px-2 text-[14px] outline-none hover:border-border-strong focus:border-primary disabled:bg-transparent",
+                datesInvalid ? "border-red-300" : "border-border"
+              )}
+            />
+            {datesInvalid && <span className="text-[13px] text-red-600">Start must be on or before due</span>}
+          </div>
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><TagIcon className="h-3.5 w-3.5" /> Tags</span>
+          <TagsField ctx={ctx} task={task} decor={props.decor} onMetaChanged={props.onMetaChanged} />
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Hash className="h-3.5 w-3.5" /> Points</span>
+          <div className="flex gap-1">
+            {["", "1", "2", "3", "5", "8", "13"].map((n) => (
+              <button
+                key={n || "none"}
+                type="button"
+                onClick={() => setDraft({ ...draft, storyPoints: n })}
+                className={cn(
+                  "h-8 min-w-8 cursor-pointer rounded-md border px-2 text-[13.5px] font-medium transition-colors disabled:cursor-default",
+                  draft.storyPoints === n ? "border-primary/40 bg-primary-soft text-primary" : "border-transparent text-subtle hover:bg-hover hover:text-foreground"
+                )}
+              >
+                {n || "—"}
+              </button>
+            ))}
+          </div>
 
           <span className="flex items-center gap-2 text-[15px] text-subtle"><Clock className="h-3.5 w-3.5" /> Updated</span>
           <span className="text-[15px] text-muted">{timeAgo(task.updatedAt)} · created {timeAgo(task.createdAt)}</span>
@@ -211,6 +382,29 @@ export function TaskDrawer(props: {
           <Textarea aria-label="Description" rows={6} value={draft.description} placeholder="Add context, acceptance criteria, links… (markdown)" onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
         </Section>
       </fieldset>
+
+      {props.meta.fields.length > 0 && (
+        <Section title="Fields" icon={<SlidersHorizontal className="h-4 w-4 text-subtle" />}>
+          <div className="grid grid-cols-[160px_1fr] items-center gap-x-3 gap-y-1.5 rounded-xl border border-border p-3">
+            {props.meta.fields.map((f) => (
+              <Fragment key={f.id}>
+                <span className="truncate text-[14px] text-subtle">{f.name}</span>
+                <FieldEditor
+                  field={f}
+                  value={props.meta.fieldValues[task.id]?.[f.id]}
+                  disabled={!canEdit}
+                  members={ctx.members}
+                  onSave={(v) => props.onFieldValue(task.id, f.id, v)}
+                />
+              </Fragment>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      <SubtasksSection {...breakdown} />
+      <ChecklistSection {...breakdown} />
+      <DependenciesSection {...breakdown} />
 
       {canEdit && (
         <section className="relative mt-7 overflow-hidden rounded-xl border border-primary/25 bg-linear-to-br from-primary/[0.10] via-transparent to-accent/[0.06] p-4">
@@ -248,8 +442,7 @@ export function TaskDrawer(props: {
               </div>
               <div className="mt-3 flex items-center gap-2">
                 <span className="text-[13px] text-subtle">
-                  via <span className="font-mono">{subtasks.provider}</span>
-                  {subtasks.note ? ` · ${subtasks.note}` : ""}
+                  {aiSourceLabel(subtasks.provider, subtasks.note)}
                 </span>
                 <Button
                   size="sm"

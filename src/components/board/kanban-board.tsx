@@ -1,43 +1,51 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import {
-  DndContext,
-  DragOverlay,
-  KeyboardSensor,
-  PointerSensor,
-  closestCorners,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragOverEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core";
-import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { AlignLeft, ChevronDown, ChevronRight, Eye, Kanban, List as ListIcon, Plus, Shuffle, Sparkles, UserRound } from "lucide-react";
+import { CalendarDays, ChartGantt, ChevronRight, Eye, Gauge, Kanban, LayoutDashboard, List as ListIcon, Plus, Rocket, Settings2, Shuffle, Sparkles, Table2 } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import type { OrgEvent, PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
-import { positionForIndex } from "@/lib/fractional-index";
 import { can } from "@/lib/rbac-shared";
-import { cn, timeAgo } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { explainConflictAction } from "@/actions/ai.actions";
-import { getBoardSnapshotAction, moveTaskAction } from "@/actions/task.actions";
+import { getBoardSnapshotAction, moveTaskAction, updateTaskAction } from "@/actions/task.actions";
 import { simulateTeammateAction } from "@/actions/demo.actions";
+import { getProjectMetaAction } from "@/actions/breakdown.actions";
+import { listSprintsAction } from "@/actions/sprint.actions";
+import type { SprintDTO } from "@/server/services/sprints";
+import type { ProjectMeta } from "@/server/services/breakdown";
+import { POSITION_STEP } from "@/lib/fractional-index";
 import { Avatar } from "@/components/ui/avatar";
-import { PRIORITY_STYLE, PriorityFlag, StatusPill, statusColor } from "@/components/ui/badge";
+import { DONE_COLOR, statusColor } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { boardReducer, groupByColumn, initBoard } from "./board-state";
+import { boardReducer, initBoard } from "./board-state";
 import { useRealtime, type ConnectionStatus } from "./use-realtime";
 import { TaskDrawer } from "./task-drawer";
 import { NewTaskDialog } from "./new-task-dialog";
 import { DigestPanel } from "./digest-panel";
+import { FilterBar } from "./filter-bar";
+import { applyFilters, EMPTY_FILTERS, type Filters } from "./filters";
+import { buildDecor, EMPTY_META } from "./decor";
+import { BoardView } from "./views/board-view";
+import { ListView } from "./views/list-view";
+import { CalendarView } from "./views/calendar-view";
+import { TimelineView } from "./views/timeline-view";
+import { DashboardView } from "./views/dashboard-view";
+import { SprintsView } from "./views/sprints-view";
+import { TableView, type SortState, type WeekLoad } from "./views/table-view";
+import { WorkloadView } from "./views/workload-view";
+import { CustomizePanel } from "./customize-panel";
+import { ViewsMenu, type GroupBy } from "./views-menu";
+import { showCapacityWarnings } from "./capacity-warnings";
+import { getWorkloadAction } from "@/actions/capacity.actions";
+import { setFieldValueAction } from "@/actions/customize.actions";
+import { startOfWeek, addDays, todayISO } from "@/lib/dates";
+import type { SavedViewConfig } from "@/db/schema";
+import { VIEWS, type TaskPatch, type ViewId, type ViewProps } from "./views/types";
 
 export type Member = { id: string; name: string; avatarUrl: string | null; role: OrgRole };
-export type Column = { id: string; title: string };
+export type Column = { id: string; title: string; color?: string | null };
 export type BoardCtx = {
   org: { id: string; slug: string; name: string; isDemo: boolean };
   project: { id: string; key: string; name: string };
@@ -48,30 +56,116 @@ export type BoardCtx = {
   aiEnabled: boolean;
 };
 
+const VIEW_META: Record<ViewId, { label: string; icon: typeof Kanban }> = {
+  board: { label: "Board", icon: Kanban },
+  list: { label: "List", icon: ListIcon },
+  table: { label: "Table", icon: Table2 },
+  sprints: { label: "Sprints", icon: Rocket },
+  calendar: { label: "Calendar", icon: CalendarDays },
+  timeline: { label: "Timeline", icon: ChartGantt },
+  workload: { label: "Workload", icon: Gauge },
+  dashboard: { label: "Dashboard", icon: LayoutDashboard },
+};
+
+/**
+ * Project workspace: owns task state, the realtime subscription, filters and the
+ * two write paths (move, field patch). Views are pure renderers over filtered tasks.
+ */
 export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const { org, project, columns, members, me, role } = props;
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [state, dispatch] = useReducer(boardReducer, props.initialTasks, initBoard);
-  const [dragItems, setDragItems] = useState<Record<string, string[]> | null>(null);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [view, setViewState] = useState<ViewId>(() => {
+    const v = searchParams.get("view");
+    return (VIEWS as readonly string[]).includes(v ?? "") ? (v as ViewId) : "board";
+  });
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [flash, setFlash] = useState<Record<string, true>>({});
   const [commentsVersion, setCommentsVersion] = useState(0);
-  const [showNew, setShowNew] = useState(false);
-  const [newColumnId, setNewColumnId] = useState<string | null>(null);
-  const [view, setView] = useState<"board" | "list">("board");
+  const [newTask, setNewTask] = useState<{ columnId?: string; dueDate?: string } | null>(null);
   const [showDigest, setShowDigest] = useState(false);
+  const [meta, setMeta] = useState<ProjectMeta>(EMPTY_META);
+  /** Bumped whenever meta reloads, so an open drawer refetches its checklist. */
+  const [metaVersion, setMetaVersion] = useState(0);
+  const [sprints, setSprints] = useState<SprintDTO[]>([]);
+  const [sort, setSort] = useState<SortState>(null);
+  const [groupBy, setGroupBy] = useState<GroupBy>("status");
+  const [showCustomize, setShowCustomize] = useState(false);
+  /** Bumped on anything that changes workload (task edits, co-assignees, capacity settings). */
+  const [workloadKey, setWorkloadKey] = useState(0);
+  const [weekLoad, setWeekLoad] = useState<WeekLoad>(new Map());
   const [simPending, startSim] = useTransition();
   /** `${taskId}:${version}` of writes this tab made, to tell our own echoes from another tab's. */
   const ownWrites = useRef(new Set<string>());
 
   const canEdit = can(role, "CREATE_OR_MOVE_TASK");
-  const columnIds = useMemo(() => columns.map((c) => c.id), [columns]);
+  const doneColumnId = columns[columns.length - 1]?.id ?? null;
   const colTitle = useCallback((id: string) => columns.find((c) => c.id === id)?.title ?? "another column", [columns]);
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
-  const ref = (t: { taskNumber: number }) => `${project.key}-${t.taskNumber}`;
-  const grouped = useMemo(() => dragItems ?? groupByColumn(state.tasks, columnIds), [dragItems, state.tasks, columnIds]);
+  const refOf = useCallback((t: { taskNumber: number }) => `${project.key}-${t.taskNumber}`, [project.key]);
+  const visible = useMemo(
+    () => applyFilters(state.tasks, filters, { meId: me.id, doneColumnId, refOf, tagsByTask: meta.tagsByTask }),
+    [state.tasks, filters, me.id, doneColumnId, refOf, meta.tagsByTask]
+  );
+  const decor = useMemo(() => buildDecor(state.tasks, meta, doneColumnId), [state.tasks, meta, doneColumnId]);
+
+  /* Project meta (checklists, tags, dependencies): load once, then debounce refreshes. */
+  const metaTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const loadMeta = useCallback(
+    (delay = 0) => {
+      clearTimeout(metaTimer.current);
+      metaTimer.current = setTimeout(async () => {
+        const r = await getProjectMetaAction(org.id, project.id);
+        if (r.ok) {
+          setMeta(r.meta);
+          setMetaVersion((v) => v + 1);
+        }
+      }, delay);
+    },
+    [org.id, project.id]
+  );
+  useEffect(() => {
+    loadMeta();
+    return () => clearTimeout(metaTimer.current);
+  }, [loadMeta]);
+
+  // This week's load per person, shown in assignee pickers before anyone is assigned.
+  const taskVersionKey = Object.values(state.tasks).reduce((s, t) => s + t.version, 0);
+  useEffect(() => {
+    const from = startOfWeek(todayISO());
+    const id = setTimeout(async () => {
+      const r = await getWorkloadAction(org.id, from, addDays(from, 6), todayISO());
+      if (r.ok) setWeekLoad(new Map(r.people.map((p) => [p.userId, { load: p.totalLoad, capacity: p.totalCapacity, status: p.status }])));
+    }, 400);
+    return () => clearTimeout(id);
+  }, [org.id, taskVersionKey, workloadKey]);
+  const onWarnings = useCallback(
+    (ws: Parameters<typeof showCapacityWarnings>[0]) => showCapacityWarnings(ws, () => setViewRef.current("workload")),
+    []
+  );
+  const setViewRef = useRef<(v: ViewId) => void>(() => {});
+
+  const loadSprints = useCallback(async () => {
+    const r = await listSprintsAction(org.id, project.id);
+    if (r.ok) setSprints(r.sprints);
+  }, [org.id, project.id]);
+  useEffect(() => {
+    void loadSprints();
+  }, [loadSprints]);
+
+  /** Keep the view in the URL (shareable, survives refresh) without a navigation. */
+  const setView = (v: ViewId) => {
+    setViewState(v);
+    const url = new URL(window.location.href);
+    if (v === "board") url.searchParams.delete("view");
+    else url.searchParams.set("view", v);
+    window.history.replaceState(null, "", url);
+  };
+
+  setViewRef.current = setView;
 
   const flashTask = (id: string) => {
     setFlash((f) => ({ ...f, [id]: true }));
@@ -81,7 +175,9 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const resync = useCallback(async () => {
     const res = await getBoardSnapshotAction(org.id, project.id);
     if (res.ok) dispatch({ type: "reset", tasks: res.tasks });
-  }, [org.id, project.id]);
+    loadMeta();
+    void loadSprints();
+  }, [org.id, project.id, loadMeta, loadSprints]);
 
   /* ----------------------------- realtime ----------------------------- */
   const onEvent = useCallback(
@@ -91,16 +187,15 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
         case "TASK_UPDATED": {
           if (e.task.projectId !== project.id) return;
           dispatch({ type: "server", task: e.task });
-          const mine = ownWrites.current.has(`${e.task.id}:${e.task.version}`);
-          if (mine) return;
+          if (ownWrites.current.has(`${e.task.id}:${e.task.version}`)) return;
           flashTask(e.task.id);
           const who = e.actor.id === me.id ? "You (another tab)" : e.actor.name;
           const what =
             e.type === "TASK_CREATED"
-              ? `created ${ref(e.task)}`
+              ? `created ${refOf(e.task)}`
               : e.action === "moved"
-                ? `moved ${ref(e.task)} to ${colTitle(e.task.columnId)}`
-                : `updated ${e.changes?.join(", ") || "details of"} ${ref(e.task)}`;
+                ? `moved ${refOf(e.task)} to ${colTitle(e.task.columnId)}`
+                : `updated ${e.changes?.join(", ") || "details of"} ${refOf(e.task)}`;
           toast(`${who} ${what}`, { duration: 2500 });
           return;
         }
@@ -108,6 +203,25 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           if (e.projectId !== project.id) return;
           dispatch({ type: "remove", taskId: e.taskId });
           if (openTaskId === e.taskId) setOpenTaskId(null);
+          loadMeta(250); // the cascade removed its checklist, tags and dependencies
+          return;
+        case "PROJECT_CONFIG_CHANGED":
+          if (e.projectId === project.id) {
+            router.refresh(); // statuses come from the server page
+            loadMeta(150); // custom field definitions
+          }
+          return;
+        case "CAPACITY_CHANGED":
+          setWorkloadKey((k) => k + 1);
+          return;
+        case "SPRINTS_CHANGED":
+          if (e.projectId === project.id) void loadSprints();
+          return;
+        case "TASK_META_CHANGED":
+          if (e.projectId !== project.id) return;
+          loadMeta(250);
+          if (e.kind === "people") setWorkloadKey((k) => k + 1);
+          if (e.actor.id !== me.id) e.taskIds.forEach(flashTask);
           return;
         case "COLUMN_REBALANCED":
           dispatch({ type: "rebalance", positions: e.positions });
@@ -120,8 +234,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           return;
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [project.id, me.id, openTaskId, colTitle, router]
+    [project.id, me.id, openTaskId, colTitle, refOf, router, loadMeta, loadSprints]
   );
 
   const { status, presence, connectionId, sendPresence } = useRealtime({ organizationId: org.id, onEvent, onResync: resync });
@@ -130,111 +243,114 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     sendPresence({ projectId: project.id, activeTaskId: openTaskId, editing: !!openTaskId && editing });
   }, [project.id, openTaskId, editing, sendPresence]);
 
-  const others = presence.filter((p) => p.connectionId !== connectionId);
   const presenceByTask = useMemo(() => {
     const m = new Map<string, PresenceUser[]>();
-    for (const p of others) if (p.activeTaskId) m.set(p.activeTaskId, [...(m.get(p.activeTaskId) ?? []), p]);
+    for (const p of presence) {
+      if (p.connectionId === connectionId || !p.activeTaskId) continue;
+      m.set(p.activeTaskId, [...(m.get(p.activeTaskId) ?? []), p]);
+    }
     return m;
-  }, [others]);
+  }, [presence, connectionId]);
 
-  /* ---------------------------- drag & drop ---------------------------- */
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
+  /* ---------------------------- write paths ---------------------------- */
 
-  const findContainer = (items: Record<string, string[]>, id: string) =>
-    id in items ? id : Object.keys(items).find((c) => items[c]!.includes(id));
-
-  function onDragStart(e: DragStartEvent) {
-    setActiveId(String(e.active.id));
-    setDragItems(groupByColumn(state.tasks, columnIds));
+  async function handleConflict(task: TaskDTO, current: TaskDTO | null) {
+    if (current) dispatch({ type: "force", task: current });
+    else dispatch({ type: "remove", taskId: task.id });
+    flashTask(task.id);
+    const id = toast.loading("Card updated by a teammate — syncing board…");
+    void resync();
+    const exp = await explainConflictAction(org.id, task.id, task.version);
+    toast.info(exp.ok ? exp.summary : "Card updated by a teammate — board synced.", { id, duration: 6000 });
   }
 
-  function onDragOver({ active, over }: DragOverEvent) {
-    if (!over || !dragItems) return;
-    const a = String(active.id);
-    const o = String(over.id);
-    const from = findContainer(dragItems, a);
-    const to = findContainer(dragItems, o);
-    if (!from || !to || from === to) return;
-    setDragItems((items) => {
-      if (!items) return items;
-      const target = items[to]!;
-      const overIndex = target.indexOf(o);
-      const index = overIndex >= 0 ? overIndex : target.length;
-      return {
-        ...items,
-        [from]: items[from]!.filter((id) => id !== a),
-        [to]: [...target.slice(0, index), a, ...target.slice(index)],
-      };
-    });
-  }
-
-  async function onDragEnd({ active, over }: DragEndEvent) {
-    const items = dragItems;
-    setDragItems(null);
-    setActiveId(null);
-    if (!over || !items) return;
-    const taskId = String(active.id);
-    const task = state.tasks[taskId];
-    const toCol = findContainer(items, String(over.id));
-    if (!task || !toCol) return;
-
-    let list = items[toCol]!;
-    const oldIdx = list.indexOf(taskId);
-    const overIdx = list.indexOf(String(over.id));
-    if (overIdx >= 0 && oldIdx !== overIdx) list = arrayMove(list, oldIdx, overIdx);
-    const index = list.indexOf(taskId);
-
-    const before = groupByColumn(state.tasks, columnIds);
-    if (task.columnId === toCol && before[toCol]!.indexOf(taskId) === index) return; // dropped in place
-
-    const neighbours = list.filter((id) => id !== taskId).map((id) => state.tasks[id]!.position);
-    const { position } = positionForIndex(neighbours, index);
-
-    // 1) optimistic: 0ms perceived latency
-    dispatch({ type: "optimisticMove", taskId, columnId: toCol, position });
-    ownWrites.current.add(`${taskId}:${task.version + 1}`);
-
-    // 2) server verifies role, tenant and version
-    const res = await moveTaskAction({
-      organizationId: org.id,
-      taskId,
-      targetColumnId: toCol,
-      newPosition: position,
-      expectedVersion: task.version,
-    });
-
+  /** Optimistic move → version-checked server write → rollback + explanation on conflict. */
+  async function commitMove(task: TaskDTO, columnId: string, position: number) {
+    dispatch({ type: "optimisticMove", taskId: task.id, columnId, position });
+    ownWrites.current.add(`${task.id}:${task.version + 1}`);
+    const res = await moveTaskAction({ organizationId: org.id, taskId: task.id, targetColumnId: columnId, newPosition: position, expectedVersion: task.version });
     if (!res.ok) {
-      dispatch({ type: "force", task }); // rollback
-      toast.error(res.code.startsWith("FORBIDDEN") ? `Not allowed: your role can't move tasks (${res.code})` : res.message);
+      dispatch({ type: "force", task });
+      toast.error(res.code.startsWith("FORBIDDEN") ? "Your role doesn't allow moving tasks." : res.message);
       return;
     }
-    if (res.conflict) {
-      // 3) someone else won the race → roll back to their version and explain
-      if (res.current) dispatch({ type: "force", task: res.current });
-      else dispatch({ type: "remove", taskId });
-      flashTask(taskId);
-      const id = toast.loading("Card updated by a teammate — syncing board…");
-      void resync();
-      const exp = await explainConflictAction(org.id, taskId, task.version);
-      toast.info(exp.ok ? exp.summary : "Card updated by a teammate — board synced.", { id, duration: 6000 });
-      return;
-    }
+    if (res.conflict) return handleConflict(task, res.current);
     dispatch({ type: "server", task: res.task });
     if (res.rebalanced) dispatch({ type: "rebalance", positions: res.rebalanced });
   }
 
-  const activeTask = activeId ? state.tasks[activeId] : null;
+  /** Complete <-> reopen: moves the task to the end of the done (or first) column. */
+  function toggleDone(task: TaskDTO) {
+    const target = task.columnId === doneColumnId ? columns[0]?.id : doneColumnId;
+    if (!target) return;
+    const last = Object.values(state.tasks)
+      .filter((t) => t.columnId === target && t.id !== task.id)
+      .reduce((m, t) => Math.max(m, t.position), 0);
+    void commitMove(task, target, last + POSITION_STEP);
+  }
+
+  /** Change status from a dropdown (table): append to the end of the target column. */
+  function moveToStatus(task: TaskDTO, columnId: string) {
+    if (task.columnId === columnId) return;
+    const last = Object.values(state.tasks)
+      .filter((t) => t.columnId === columnId)
+      .reduce((m, t) => Math.max(m, t.position), 0);
+    void commitMove(task, columnId, last + POSITION_STEP);
+  }
+
+  async function setFieldValue(taskId: string, fieldId: string, value: string | number | null) {
+    const r = await setFieldValueAction(org.id, taskId, fieldId, value);
+    if (!r.ok) return void toast.error(r.message);
+    loadMeta();
+  }
+
+  function applySavedView(c: SavedViewConfig) {
+    setView((VIEWS as readonly string[]).includes(c.view) ? (c.view as ViewId) : "board");
+    setFilters({ ...EMPTY_FILTERS, ...(c.filters as Partial<Filters>) });
+    setSort(c.sort ?? null);
+    setGroupBy((c.groupBy as GroupBy) ?? "status");
+  }
+
+  /** Same contract for field edits made directly in a view (calendar/timeline). */
+  async function commitPatch(task: TaskDTO, patch: TaskPatch) {
+    dispatch({ type: "force", task: { ...task, ...patch } });
+    ownWrites.current.add(`${task.id}:${task.version + 1}`);
+    const res = await updateTaskAction({ organizationId: org.id, taskId: task.id, expectedVersion: task.version, patch }, todayISO());
+    if (!res.ok) {
+      dispatch({ type: "force", task });
+      toast.error(res.message);
+      return;
+    }
+    if (res.conflict) return handleConflict(task, res.current);
+    dispatch({ type: "server", task: res.task });
+    onWarnings(res.warnings);
+    if ("dueDate" in patch) toast.success(patch.dueDate ? `${refOf(task)} rescheduled` : `${refOf(task)} unscheduled`, { duration: 1800 });
+    if ("sprintId" in patch) {
+      const s = sprints.find((x) => x.id === patch.sprintId);
+      toast.success(s ? `${refOf(task)} moved to ${s.name}` : `${refOf(task)} moved to the backlog`, { duration: 1800 });
+    }
+  }
+
+  /* ------------------------------- render ------------------------------- */
   const openTask = openTaskId ? state.tasks[openTaskId] : null;
   const ctx: BoardCtx = props;
-  const total = Object.keys(state.tasks).length;
-  const doneCount = grouped[columns[columns.length - 1]?.id ?? ""]?.length ?? 0;
-  const colorOf = (i: number) => statusColor(i, columns.length);
-  const openNew = (columnId?: string) => {
-    setNewColumnId(columnId ?? columns[0]?.id ?? null);
-    setShowNew(true);
+  const all = Object.values(state.tasks);
+  const doneCount = all.filter((t) => t.columnId === doneColumnId).length;
+
+  const viewProps: ViewProps = {
+    tasks: visible,
+    columns,
+    colorOf: (i) => columns[i]?.color ?? statusColor(i, columns.length),
+    doneColumnId,
+    refOf,
+    memberById,
+    presenceByTask,
+    flash,
+    canEdit,
+    onOpen: setOpenTaskId,
+    onAdd: (opts) => setNewTask(opts ?? {}),
+    decor,
+    allTasks: state.tasks,
   };
 
   return (
@@ -277,102 +393,111 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
                 <Shuffle className="h-4 w-4" /> Simulate teammate
               </Button>
             )}
+            {can(role, "MANAGE_PROJECTS") && (
+              <Button variant="outline" size="sm" onClick={() => setShowCustomize(true)} title="Statuses and custom fields">
+                <Settings2 className="h-4 w-4" /> Customize
+              </Button>
+            )}
             <Button variant="ai" size="sm" onClick={() => setShowDigest(true)}>
               <Sparkles className="h-4 w-4" /> AI standup
             </Button>
             {canEdit && (
-              <Button size="sm" onClick={() => openNew()}>
+              <Button size="sm" onClick={() => setNewTask({})}>
                 <Plus className="h-4 w-4" /> Add Task
               </Button>
             )}
           </div>
         </div>
 
-        {/* view tabs */}
-        <div className="mt-3 flex items-end gap-1">
-          {([
-            ["board", "Board", Kanban],
-            ["list", "List", ListIcon],
-          ] as const).map(([v, label, Icon]) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={cn(
-                "flex cursor-pointer items-center gap-2 border-b-2 px-3 pb-2.5 pt-1 text-[15px] font-medium transition-colors",
-                view === v ? "border-primary text-primary" : "border-transparent text-muted hover:text-foreground"
-              )}
-            >
-              <Icon className="h-4 w-4" /> {label}
-            </button>
-          ))}
+        <nav className="mt-3 flex items-end gap-1 overflow-x-auto" aria-label="Views">
+          {VIEWS.map((v) => {
+            const { label, icon: Icon } = VIEW_META[v];
+            return (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                aria-current={view === v ? "page" : undefined}
+                className={cn(
+                  "flex shrink-0 cursor-pointer items-center gap-2 border-b-2 px-3 pb-2.5 pt-1 text-[15px] font-medium transition-colors",
+                  view === v ? "border-primary text-primary" : "border-transparent text-muted hover:text-foreground"
+                )}
+              >
+                <Icon className="h-4 w-4" /> {label}
+              </button>
+            );
+          })}
           <div className="mb-2 ml-auto hidden items-center gap-3 lg:flex">
-            <Progress done={doneCount} total={total} />
+            <Progress done={doneCount} total={all.length} />
           </div>
-        </div>
+        </nav>
       </header>
+
+      <FilterBar filters={filters} onChange={setFilters} members={members} tags={decor.tags}
+        sprints={sprints}
+        shown={Object.keys(visible).length}
+        total={all.length}
+        extra={
+          <ViewsMenu
+            organizationId={org.id}
+            projectId={project.id}
+            view={view}
+            filters={filters}
+            sort={sort}
+            groupBy={groupBy}
+            meta={meta}
+            canShare={canEdit}
+            onApply={applySavedView}
+            onSort={setSort}
+            onGroup={setGroupBy}
+          />
+        }
+      />
 
       {!canEdit && (
         <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-8 py-2.5 text-[15px] text-amber-800">
           <Eye className="h-4 w-4" />
-          Read-only — you are a <b className="font-semibold">viewer</b>. The server rejects viewer mutations regardless of what the UI allows.
+          You have view-only access to this project as a <b className="font-semibold">viewer</b>.
         </div>
       )}
 
-      {/* ---------- board view ---------- */}
-      {view === "board" ? (
-        <DndContext id={`board-${project.id}`} sensors={sensors} collisionDetection={closestCorners} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => { setDragItems(null); setActiveId(null); }}>
-          <div className="flex flex-1 gap-4 overflow-x-auto bg-canvas px-8 py-6">
-            {columns.map((col, i) => (
-              <BoardColumn key={col.id} column={col} color={colorOf(i)} count={grouped[col.id]?.length ?? 0} canAdd={canEdit} onAdd={() => openNew(col.id)}>
-                <SortableContext items={grouped[col.id] ?? []} strategy={verticalListSortingStrategy}>
-                  {(grouped[col.id] ?? []).map((id) => {
-                    const t = state.tasks[id];
-                    if (!t) return null;
-                    return (
-                      <SortableCard
-                        key={id}
-                        task={t}
-                        refLabel={ref(t)}
-                        disabled={!canEdit}
-                        done={i === columns.length - 1}
-                        assignee={t.assigneeId ? memberById.get(t.assigneeId) : undefined}
-                        viewers={presenceByTask.get(id) ?? []}
-                        flash={!!flash[id]}
-                        onOpen={() => setOpenTaskId(id)}
-                      />
-                    );
-                  })}
-                </SortableContext>
-              </BoardColumn>
-            ))}
-          </div>
-          <DragOverlay dropAnimation={{ duration: 180, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
-            {activeTask && (
-              <CardBody
-                task={activeTask}
-                refLabel={ref(activeTask)}
-                assignee={activeTask.assigneeId ? memberById.get(activeTask.assigneeId) : undefined}
-                viewers={[]}
-                className="rotate-[2deg] cursor-grabbing shadow-glow"
-              />
-            )}
-          </DragOverlay>
-        </DndContext>
-      ) : (
-        <ListView
-          columns={columns}
-          grouped={grouped}
-          tasks={state.tasks}
-          colorOf={colorOf}
-          refOf={ref}
-          memberById={memberById}
-          presenceByTask={presenceByTask}
-          flash={flash}
-          canAdd={canEdit}
-          onAdd={openNew}
+      {view === "board" && <BoardView {...viewProps} projectId={project.id} onMove={commitMove} />}
+      {view === "list" && <ListView {...viewProps} groupBy={groupBy} sort={sort} sprints={sprints} meta={meta} />}
+      {view === "table" && (
+        <TableView
+          {...viewProps}
+          meta={meta}
+          sprints={sprints}
+          sort={sort}
+          onSort={setSort}
+          weekLoad={weekLoad}
+          onPatch={commitPatch}
+          onStatus={moveToStatus}
+          onFieldValue={setFieldValue}
+        />
+      )}
+      {view === "workload" && (
+        <WorkloadView
+          organizationId={org.id}
+          members={members}
+          canManage={can(role, "INVITE_OR_CHANGE_ROLES")}
+          refreshKey={workloadKey + taskVersionKey}
+          projectTaskIds={new Set(Object.keys(state.tasks))}
           onOpen={setOpenTaskId}
         />
       )}
+      {view === "sprints" && (
+        <SprintsView
+          {...viewProps}
+          organizationId={org.id}
+          projectId={project.id}
+          sprints={sprints}
+          canManage={can(role, "MANAGE_SPRINTS")}
+          onPatch={commitPatch}
+        />
+      )}
+      {view === "calendar" && <CalendarView {...viewProps} onPatch={commitPatch} />}
+      {view === "timeline" && <TimelineView {...viewProps} onPatch={commitPatch} />}
+      {view === "dashboard" && <DashboardView {...viewProps} organizationId={org.id} projectId={project.id} filtered={visible !== state.tasks} />}
 
       {openTask && (
         <TaskDrawer
@@ -381,23 +506,70 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
           task={openTask}
           viewers={presenceByTask.get(openTask.id) ?? []}
           commentsVersion={commentsVersion}
-          onClose={() => { setOpenTaskId(null); setEditing(false); }}
+          allTasks={state.tasks}
+          decor={decor}
+          metaVersion={metaVersion}
+          onMetaChanged={() => loadMeta()}
+          onOpenTask={setOpenTaskId}
+          onToggleDone={toggleDone}
+          sprints={sprints}
+          meta={meta}
+          weekLoad={weekLoad}
+          onWarnings={onWarnings}
+          onFieldValue={setFieldValue}
+          onClose={() => {
+            setOpenTaskId(null);
+            setEditing(false);
+          }}
           onEditingChange={setEditing}
-          onServerTask={(t) => { ownWrites.current.add(`${t.id}:${t.version}`); dispatch({ type: "server", task: t }); }}
+          onServerTask={(t) => {
+            ownWrites.current.add(`${t.id}:${t.version}`);
+            dispatch({ type: "server", task: t });
+          }}
           onForceTask={(t) => dispatch({ type: "force", task: t })}
-          onRemoved={(id) => { dispatch({ type: "remove", taskId: id }); setOpenTaskId(null); }}
-          onCreated={(ts) => ts.forEach((t) => { ownWrites.current.add(`${t.id}:${t.version}`); dispatch({ type: "server", task: t }); })}
+          onRemoved={(id) => {
+            dispatch({ type: "remove", taskId: id });
+            setOpenTaskId(null);
+          }}
+          onCreated={(ts) =>
+            ts.forEach((t) => {
+              ownWrites.current.add(`${t.id}:${t.version}`);
+              dispatch({ type: "server", task: t });
+            })
+          }
         />
       )}
-      {showNew && (
+      {newTask && (
         <NewTaskDialog
           ctx={ctx}
-          initialColumnId={newColumnId ?? undefined}
-          onClose={() => setShowNew(false)}
-          onCreated={(t) => { ownWrites.current.add(`${t.id}:${t.version}`); dispatch({ type: "server", task: t }); flashTask(t.id); }}
+          initialColumnId={newTask.columnId}
+          initialDueDate={newTask.dueDate}
+          sprints={sprints}
+          weekLoad={weekLoad}
+          onWarnings={onWarnings}
+          onClose={() => setNewTask(null)}
+          onCreated={(t) => {
+            ownWrites.current.add(`${t.id}:${t.version}`);
+            dispatch({ type: "server", task: t });
+            flashTask(t.id);
+          }}
         />
       )}
       {showDigest && <DigestPanel ctx={ctx} onClose={() => setShowDigest(false)} />}
+      {showCustomize && (
+        <CustomizePanel
+          organizationId={org.id}
+          projectId={project.id}
+          columns={columns}
+          colorOf={viewProps.colorOf}
+          meta={meta}
+          onClose={() => setShowCustomize(false)}
+          onChanged={() => {
+            router.refresh();
+            loadMeta();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -412,7 +584,7 @@ function Progress({ done, total }: { done: number; total: number }) {
         <b className="font-semibold text-foreground">{done}</b>/{total} done
       </span>
       <div className="h-2 w-36 overflow-hidden rounded-full bg-surface-2">
-        <div className="h-full rounded-full bg-[#2db87d] transition-all duration-500" style={{ width: `${pct}%` }} />
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: DONE_COLOR }} />
       </div>
       <span className="font-semibold text-foreground">{pct}%</span>
     </div>
@@ -457,248 +629,6 @@ function PresenceBar({ users, myConnectionId, projectId }: { users: PresenceUser
       <span className="text-[13px] text-muted">
         {unique.length} viewing{myTabs > 1 ? ` · ${myTabs} tabs` : ""}
       </span>
-    </div>
-  );
-}
-
-function BoardColumn({
-  column,
-  color,
-  count,
-  canAdd,
-  onAdd,
-  children,
-}: {
-  column: Column;
-  color: string;
-  count: number;
-  canAdd: boolean;
-  onAdd: () => void;
-  children: React.ReactNode;
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: column.id });
-  return (
-    <section
-      ref={setNodeRef}
-      aria-label={column.title}
-      className={cn("flex min-w-[290px] flex-1 basis-0 flex-col rounded-xl transition-shadow duration-150", isOver && "shadow-[0_0_0_2px_var(--color-primary)]")}
-      style={{ backgroundColor: `${color}12` }}
-    >
-      <header className="flex items-center gap-2 px-3 pb-2 pt-3">
-        <StatusPill title={column.title} color={color} count={count} />
-        {canAdd && (
-          <button onClick={onAdd} title={`Add task to ${column.title}`} className="ml-auto cursor-pointer rounded-md p-1 text-subtle transition-colors hover:bg-white hover:text-foreground">
-            <Plus className="h-4 w-4" />
-          </button>
-        )}
-      </header>
-      <div className="flex min-h-24 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
-        {children}
-        {count === 0 && (
-          <div className="flex items-center justify-center rounded-lg border-2 border-dashed py-8 text-[14px] text-subtle" style={{ borderColor: `${color}40` }}>
-            Drop tasks here
-          </div>
-        )}
-        {canAdd && (
-          <button
-            onClick={onAdd}
-            className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-2 text-left text-[14px] font-medium text-muted transition-colors hover:bg-white hover:text-foreground"
-          >
-            <Plus className="h-4 w-4" /> Add Task
-          </button>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function SortableCard(props: {
-  task: TaskDTO;
-  refLabel: string;
-  disabled: boolean;
-  done: boolean;
-  assignee?: Member;
-  viewers: PresenceUser[];
-  flash: boolean;
-  onOpen: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props.task.id, disabled: props.disabled });
-  return (
-    <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      {...attributes}
-      {...listeners}
-      onClick={props.onOpen}
-      onKeyDown={(e) => {
-        listeners?.onKeyDown?.(e);
-        if (e.key === "Enter") props.onOpen();
-      }}
-      aria-label={`${props.refLabel} ${props.task.title}`}
-      className="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-primary"
-    >
-      {isDragging ? (
-        <div className="h-[104px] rounded-lg border-2 border-dashed border-primary/40 bg-primary-soft" />
-      ) : (
-        <CardBody {...props} className={cn(props.flash && "animate-flash", !props.disabled && "cursor-grab active:cursor-grabbing")} />
-      )}
-    </div>
-  );
-}
-
-function CardBody({
-  task,
-  refLabel,
-  assignee,
-  viewers,
-  done,
-  className,
-}: {
-  task: TaskDTO;
-  refLabel: string;
-  assignee?: Member;
-  viewers: PresenceUser[];
-  done?: boolean;
-  className?: string;
-}) {
-  const editor = viewers.find((v) => v.editing);
-  const someone = editor ?? viewers[0];
-  return (
-    <article
-      className={cn(
-        "group relative rounded-lg border border-border bg-white p-3.5 shadow-card transition-all duration-150 hover:border-border-strong hover:shadow-lift",
-        someone && "border-primary/50 ring-2 ring-primary/15",
-        className
-      )}
-    >
-      <div className="flex items-center gap-2 text-[13px] text-subtle">
-        <span className="font-medium">{refLabel}</span>
-        {task.description && <AlignLeft className="h-3.5 w-3.5" />}
-        {someone && (
-          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-2 py-0.5 text-[12px] font-semibold text-primary">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-            {someone.name.split(" ")[0]} {editor ? "editing…" : "viewing"}
-          </span>
-        )}
-      </div>
-      <p className={cn("mt-1.5 text-[16px] font-medium leading-snug text-foreground", done && "text-muted line-through decoration-black/25")}>{task.title}</p>
-      <div className="mt-3 flex items-center gap-2.5">
-        {assignee ? (
-          <Avatar id={assignee.id} name={assignee.name} src={assignee.avatarUrl} size={26} />
-        ) : (
-          <span className="flex h-[26px] w-[26px] items-center justify-center rounded-full border border-dashed border-border-strong text-subtle" title="Unassigned">
-            <UserRound className="h-3.5 w-3.5" />
-          </span>
-        )}
-        <span className="inline-flex items-center gap-1.5 text-[13px] text-muted" title={`${PRIORITY_STYLE[task.priority].label} priority`}>
-          <PriorityFlag priority={task.priority} size={15} />
-          {PRIORITY_STYLE[task.priority].label}
-        </span>
-        <span className="ml-auto text-[12px] text-subtle opacity-0 transition-opacity group-hover:opacity-100">v{task.version}</span>
-      </div>
-    </article>
-  );
-}
-
-/* --------------------------------- list view -------------------------------- */
-
-function ListView(props: {
-  columns: Column[];
-  grouped: Record<string, string[]>;
-  tasks: Record<string, TaskDTO>;
-  colorOf: (i: number) => string;
-  refOf: (t: { taskNumber: number }) => string;
-  memberById: Map<string, Member>;
-  presenceByTask: Map<string, PresenceUser[]>;
-  flash: Record<string, true>;
-  canAdd: boolean;
-  onAdd: (columnId: string) => void;
-  onOpen: (id: string) => void;
-}) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  return (
-    <div className="flex-1 overflow-auto bg-white px-8 py-6">
-      <div className="space-y-7">
-        {props.columns.map((col, i) => {
-          const ids = props.grouped[col.id] ?? [];
-          const color = props.colorOf(i);
-          const isCollapsed = collapsed[col.id];
-          return (
-            <section key={col.id}>
-              <div className="mb-2 flex items-center gap-2">
-                <button
-                  onClick={() => setCollapsed((c) => ({ ...c, [col.id]: !c[col.id] }))}
-                  className="cursor-pointer rounded p-0.5 text-subtle hover:bg-hover"
-                  aria-label={isCollapsed ? "Expand group" : "Collapse group"}
-                >
-                  <ChevronDown className={cn("h-4 w-4 transition-transform", isCollapsed && "-rotate-90")} />
-                </button>
-                <StatusPill title={col.title} color={color} count={ids.length} />
-              </div>
-              {!isCollapsed && (
-                <div className="overflow-hidden rounded-lg border border-border">
-                  <div className="grid grid-cols-[minmax(0,1fr)_170px_130px_110px_110px] border-b border-border bg-surface-2 px-4 py-2 text-[12.5px] font-semibold uppercase tracking-wide text-subtle">
-                    <span>Name</span>
-                    <span>Assignee</span>
-                    <span>Priority</span>
-                    <span>ID</span>
-                    <span>Updated</span>
-                  </div>
-                  {ids.map((id) => {
-                    const t = props.tasks[id];
-                    if (!t) return null;
-                    const assignee = t.assigneeId ? props.memberById.get(t.assigneeId) : undefined;
-                    const viewers = props.presenceByTask.get(id) ?? [];
-                    return (
-                      <button
-                        key={id}
-                        onClick={() => props.onOpen(id)}
-                        className={cn(
-                          "grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_170px_130px_110px_110px] items-center border-b border-border px-4 py-3 text-left text-[15px] transition-colors last:border-0 hover:bg-[#fafafe]",
-                          props.flash[id] && "animate-flash"
-                        )}
-                      >
-                        <span className="flex min-w-0 items-center gap-3">
-                          <span className="h-3.5 w-3.5 shrink-0 rounded-full border-2" style={{ borderColor: color, backgroundColor: i === props.columns.length - 1 ? color : "transparent" }} />
-                          <span className="truncate font-medium">{t.title}</span>
-                          {viewers.length > 0 && (
-                            <span className="shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[12px] font-semibold text-primary">
-                              {viewers[0]!.name.split(" ")[0]} {viewers.some((v) => v.editing) ? "editing…" : "viewing"}
-                            </span>
-                          )}
-                        </span>
-                        <span className="flex items-center gap-2 text-[14px] text-muted">
-                          {assignee ? (
-                            <>
-                              <Avatar id={assignee.id} name={assignee.name} src={assignee.avatarUrl} size={24} />
-                              <span className="truncate">{assignee.name.split(" ")[0]}</span>
-                            </>
-                          ) : (
-                            <span className="text-subtle">—</span>
-                          )}
-                        </span>
-                        <span className="flex items-center gap-1.5 text-[14px] text-muted">
-                          <PriorityFlag priority={t.priority} /> {PRIORITY_STYLE[t.priority].label}
-                        </span>
-                        <span className="text-[14px] text-subtle">{props.refOf(t)}</span>
-                        <span className="text-[14px] text-subtle">{timeAgo(t.updatedAt)}</span>
-                      </button>
-                    );
-                  })}
-                  {props.canAdd && (
-                    <button
-                      onClick={() => props.onAdd(col.id)}
-                      className="flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left text-[14px] font-medium text-subtle transition-colors hover:bg-hover hover:text-foreground"
-                    >
-                      <Plus className="h-4 w-4" /> Add Task
-                    </button>
-                  )}
-                </div>
-              )}
-            </section>
-          );
-        })}
-      </div>
     </div>
   );
 }

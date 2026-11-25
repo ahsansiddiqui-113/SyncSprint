@@ -20,7 +20,7 @@ export default async function MembersPage({ params }: { params: Promise<{ orgSlu
       <PageHeader
         eyebrow={org.name}
         title="Members"
-        description={<>Role hierarchy: <b className="text-foreground">owner › admin › member › viewer</b>. Every change is re-checked on the server and written to the audit log.</>}
+        description={<>Manage who's in this workspace and what they can do. Roles: <b className="text-foreground">owner › admin › member › viewer</b>.</>}
       />
       <Card className="overflow-hidden">
         <MembersTable

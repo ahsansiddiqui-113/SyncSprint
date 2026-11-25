@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import {
@@ -35,7 +35,18 @@ export function slugify(input: string) {
 
 export async function listMyOrganizations(conn: DB, userId: string) {
   return conn
-    .select({ id: organizations.id, name: organizations.name, slug: organizations.slug, role: orgMembers.role, isDemo: organizations.isDemo })
+    .select({
+      id: organizations.id,
+      name: organizations.name,
+      slug: organizations.slug,
+      role: orgMembers.role,
+      isDemo: organizations.isDemo,
+      createdAt: organizations.createdAt,
+      // Correlated counts; qualified explicitly (drizzle emits bare column names in sql``).
+      memberCount: sql<number>`(select count(*)::int from org_members m where m.organization_id = "organizations"."id")`,
+      projectCount: sql<number>`(select count(*)::int from projects p where p.organization_id = "organizations"."id")`,
+      taskCount: sql<number>`(select count(*)::int from tasks t where t.organization_id = "organizations"."id")`,
+    })
     .from(orgMembers)
     .innerJoin(organizations, eq(organizations.id, orgMembers.organizationId))
     .where(eq(orgMembers.userId, userId))
@@ -405,6 +416,13 @@ export const AUDIT_ACTIONS = [
   "INVITE_REVOKED",
   "ORG_CREATED",
   "AI_SUBTASKS_ADDED",
+  "CHECKLIST_ITEM_ADDED",
+  "CHECKLIST_ITEM_DONE",
+  "TAG_ADDED",
+  "DEPENDENCY_ADDED",
+  "SPRINT_CREATED",
+  "SPRINT_STARTED",
+  "SPRINT_COMPLETED",
 ] as const;
 
 export async function listAuditLogs(
@@ -445,4 +463,54 @@ export async function taskRefs(conn: DB, organizationId: string, taskIds: string
     .innerJoin(projects, eq(projects.id, tasks.projectId))
     .where(and(eq(tasks.organizationId, organizationId), inArray(tasks.id, taskIds)));
   return new Map(rows.map((r) => [r.id, `${r.key}-${r.n} ${r.title}`]));
+}
+
+/* ------------------------------ dashboards ------------------------------ */
+
+/**
+ * Created vs completed per UTC day for one project, from the audit log.
+ * "Completed" = a TASK_MOVED into the project's last (done) column.
+ * Tenant-scoped after RBAC; bounded by `days` so it stays cheap.
+ */
+export async function projectFlowSeries(conn: DB, actorId: string, organizationId: string, projectId: string, days = 14) {
+  await requireOrgPermission(actorId, organizationId, "viewer", conn);
+  const span = Math.min(Math.max(Math.trunc(days), 1), 90);
+
+  const cols = await conn
+    .select({ id: boardColumns.id })
+    .from(boardColumns)
+    .where(and(eq(boardColumns.organizationId, organizationId), eq(boardColumns.projectId, projectId)))
+    .orderBy(asc(boardColumns.position));
+  if (cols.length === 0) throw new AppError("NOT_FOUND", "Project not found");
+  const doneColumnId = cols[cols.length - 1]!.id;
+
+  const end = new Date();
+  const startDay = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() - (span - 1)));
+  const rows = await conn
+    .select({ action: auditLogs.action, metadata: auditLogs.metadata, createdAt: auditLogs.createdAt })
+    .from(auditLogs)
+    .innerJoin(tasks, and(eq(tasks.id, auditLogs.entityId), eq(tasks.organizationId, organizationId)))
+    .where(
+      and(
+        eq(auditLogs.organizationId, organizationId),
+        eq(tasks.projectId, projectId),
+        inArray(auditLogs.action, ["TASK_CREATED", "TASK_MOVED"]),
+        gte(auditLogs.createdAt, startDay)
+      )
+    )
+    .limit(10_000);
+
+  const series = Array.from({ length: span }, (_, i) => ({
+    day: new Date(startDay.getTime() + i * 86_400_000).toISOString().slice(0, 10),
+    created: 0,
+    completed: 0,
+  }));
+  const index = new Map(series.map((s, i) => [s.day, i]));
+  for (const r of rows) {
+    const i = index.get(r.createdAt.toISOString().slice(0, 10));
+    if (i === undefined) continue;
+    if (r.action === "TASK_CREATED") series[i]!.created++;
+    else if (r.metadata.targetColumnId === doneColumnId) series[i]!.completed++;
+  }
+  return series;
 }

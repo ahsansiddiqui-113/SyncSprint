@@ -6,6 +6,7 @@ import { sprintDigestAction } from "@/actions/ai.actions";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Sheet } from "./sheet";
+import { aiSourceLabel } from "@/lib/ai-label";
 import type { BoardCtx } from "./kanban-board";
 
 type Digest = {
@@ -54,7 +55,7 @@ export function DigestPanel({ ctx, onClose }: { ctx: BoardCtx; onClose: () => vo
         </Button>
       </div>
       {error && <p className="text-sm text-rose-600">{error}</p>}
-      {!result && pending && <p className="text-sm text-muted">Summarising board + audit trail…</p>}
+      {!result && pending && <p className="text-sm text-muted">Summarizing recent work…</p>}
       {result && (
         <div className="space-y-4">
           <p className="text-base font-medium">{result.digest.headline}</p>
@@ -71,8 +72,7 @@ export function DigestPanel({ ctx, onClose }: { ctx: BoardCtx; onClose: () => vo
           <Section title="Blockers & risks" items={result.digest.blockersAndRisks} />
           <Section title="Suggested focus" items={result.digest.suggestedFocus} />
           <p className="text-[13px] text-muted">
-            Generated via {result.provider}
-            {result.note ? ` — ${result.note}` : ""}. Only this workspace&apos;s data was used (tenant-scoped after RBAC).
+            {aiSourceLabel(result.provider, result.note)} · Based on this project&apos;s tasks and recent activity.
           </p>
         </div>
       )}

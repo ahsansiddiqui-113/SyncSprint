@@ -18,7 +18,7 @@ export function CreateOrgForm() {
         })
       }
     >
-      <Input name="name" placeholder="Acme Inc." required minLength={2} maxLength={120} />
+      <Input name="name" placeholder="e.g. Acme Inc." aria-label="Workspace name" required minLength={2} maxLength={120} />
       <Button disabled={pending}>{pending ? "Creating…" : "Create"}</Button>
     </form>
   );

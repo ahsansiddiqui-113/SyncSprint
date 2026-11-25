@@ -1,8 +1,18 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   auditLogs,
+  sprints,
+  sprintSnapshots,
+  memberCapacity,
+  taskAssignees,
+  timeOff,
+  workSchedules,
+  checklistItems,
+  tags,
+  taskDependencies,
+  taskTags,
   boardColumns,
   orgMembers,
   organizations,
@@ -80,6 +90,15 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
 
     const assignable = [mates[0]!.id, mates[1]!.id, mates[2]!.id];
     const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const POINTS = [1, 2, 3, 5, 8, 3, 5, 2];
+    /** Believable schedule per status: backlog in the future, done in the past, one item overdue. */
+    const schedule = (column: number, i: number): { startDate: string | null; dueDate: string | null } => {
+      if (column === 0) return i % 3 === 2 ? { startDate: null, dueDate: null } : { startDate: day(3 + i), dueDate: day(7 + i * 2) };
+      if (column === 1) return { startDate: day(-4 - (i % 3)), dueDate: day((i % 3) - 1) };
+      if (column === 2) return { startDate: day(-6), dueDate: day(1 + (i % 2)) };
+      return { startDate: day(-14 + i), dueDate: day(-5 + (i % 3)) };
+    };
 
     for (const [p, seedTasks] of [
       [{ name: "Platform Engineering", key: "ENG", description: "Core product & multi-tenant platform" }, ENG_TASKS],
@@ -111,27 +130,223 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
               priority: t.priority,
               assigneeId: t.assignee !== undefined ? assignable[t.assignee]! : null,
               position: n * POSITION_STEP,
-              createdAt: minutesAgo(60 * 24 * 3 - i * 30),
-              updatedAt: minutesAgo(60 * 24 - i * 20),
+              ...schedule(t.column, i),
+              storyPoints: POINTS[i % POINTS.length]!,
+              // Spread creation across the last ~2 weeks (oldest first) for the dashboard.
+              createdAt: minutesAgo(60 * 24 * (13 - i) + 90),
+              updatedAt: minutesAgo(60 * 24 * Math.max(0, Math.round((13 - i) * 0.6)) + 45),
             };
           })
         )
         .returning();
 
-      // Some believable history for the activity feed + AI digest.
-      await tx.insert(auditLogs).values(
-        created
-          .filter((_, i) => seedTasks[i]!.column > 0)
-          .map((t, i) => ({
+      // Believable history for the activity feed, dashboard and AI digest:
+      // every task gets a TASK_CREATED at its creation time, and tasks past
+      // Backlog get a TASK_MOVED into their column a few days later.
+      await tx.insert(auditLogs).values([
+        ...created.map((t, i) => ({
+          organizationId: orgId,
+          actorId: t.assigneeId ?? mates[0]!.id,
+          action: "TASK_CREATED",
+          entityType: "task",
+          entityId: t.id,
+          metadata: { ref: `${p.key}-${t.taskNumber}`, title: t.title, columnId: cols[0]!.id },
+          createdAt: t.createdAt,
+        })),
+        ...created
+          .map((t, i) => ({ t, i }))
+          .filter(({ i }) => seedTasks[i]!.column > 0)
+          .map(({ t, i }) => ({
             organizationId: orgId,
             actorId: t.assigneeId ?? mates[0]!.id,
             action: "TASK_MOVED",
             entityType: "task",
             entityId: t.id,
             metadata: { targetColumnId: t.columnId, newPosition: t.position, version: 1 },
-            createdAt: minutesAgo(240 - i * 15),
-          }))
+            createdAt: minutesAgo(60 * 24 * Math.max(0, Math.round((13 - i) * 0.6)) + 45),
+          })),
+      ]);
+
+      if (p.key === "ENG") {
+        await seedBreakdown(created, project!.id, cols);
+        await seedSprints(project!.id, cols);
+        await seedCapacity(project!.id, cols);
+      }
+    }
+
+    /**
+     * Phase 3 sample data: work item types, two completed sprints (velocity), an
+     * active sprint with a week of daily snapshots (burndown/burnup, including a
+     * mid-sprint scope increase) and a planned next sprint.
+     */
+    /**
+     * Workload sample data: hour estimates on open work, a part-time teammate with
+     * time off next week, and one person deliberately overloaded this week so the
+     * Workload view and capacity warnings have something real to show.
+     */
+    async function seedCapacity(projectId: string, cols: (typeof boardColumns.$inferSelect)[]) {
+      const [sara, alex, priya] = mates;
+      await tx.insert(workSchedules).values({ organizationId: orgId, hours: [8, 8, 8, 8, 8, 0, 0], nearThreshold: 85 });
+      // Priya: part-time, Mon–Thu 6h (24h/week).
+      await tx.insert(memberCapacity).values({ organizationId: orgId, userId: priya!.id, hours: [6, 6, 6, 6, 0, 0, 0] });
+      // Priya is on vacation for two days next week.
+      const nextMon = (() => {
+        const d = new Date();
+        const wd = (d.getUTCDay() + 6) % 7;
+        return day(7 - wd);
+      })();
+      const plus = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+      await tx.insert(timeOff).values({ organizationId: orgId, userId: priya!.id, kind: "vacation", startDate: plus(nextMon, 1), endDate: plus(nextMon, 2), note: "Family trip" });
+
+      const open = (await tx.select().from(tasks).where(eq(tasks.projectId, projectId))).filter((t) => t.columnId !== cols[cols.length - 1]!.id);
+      for (const t of open) {
+        // ~1.5h per story point, rounded to the half hour.
+        const est = Math.max(1, Math.round((t.storyPoints ?? 2) * 1.5 * 2) / 2);
+        await tx.update(tasks).set({ estimateHours: est }).where(eq(tasks.id, t.id));
+      }
+      // Alex is overloaded this week: a big task due in 2 days on top of their sprint work.
+      const [counter] = await tx.update(projects).set({ taskCounter: sql`${projects.taskCounter} + 1` }).where(eq(projects.id, projectId)).returning({ n: projects.taskCounter });
+      const [big] = await tx
+        .insert(tasks)
+        .values({
+          organizationId: orgId, projectId, columnId: cols[1]!.id, taskNumber: counter!.n, title: "Migrate billing data to the new schema",
+          priority: "high", type: "story", assigneeId: alex!.id, estimateHours: 24, storyPoints: 8, startDate: day(0), dueDate: day(2),
+          position: 95 * POSITION_STEP, createdAt: minutesAgo(60 * 3), updatedAt: minutesAgo(60 * 3),
+        })
+        .returning();
+      // Shared work: Sara pairs with Alex on SSO (the estimate is split between them).
+      const sso = open.find((t) => t.title.startsWith("SSO"));
+      if (sso) await tx.insert(taskAssignees).values({ organizationId: orgId, taskId: sso.id, userId: sara!.id });
+      await tx.insert(auditLogs).values({
+        organizationId: orgId, actorId: sara!.id, action: "TASK_CREATED", entityType: "task", entityId: big!.id,
+        metadata: { ref: `ENG-${counter!.n}`, title: big!.title, columnId: cols[1]!.id }, createdAt: minutesAgo(60 * 3),
+      });
+    }
+
+    async function seedSprints(projectId: string, cols: (typeof boardColumns.$inferSelect)[]) {
+      const all = await tx.select().from(tasks).where(eq(tasks.projectId, projectId));
+      const byNumber = (n: number) => all.find((t) => t.taskNumber === n);
+      const TYPES: Record<number, "epic" | "story" | "task" | "bug"> = {
+        1: "epic", 2: "story", 3: "task", 4: "story", 5: "bug", 6: "epic", 7: "story", 8: "story", 9: "bug", 10: "task", 11: "task", 12: "story",
+      };
+      for (const [n, type] of Object.entries(TYPES)) {
+        const t = byNumber(Number(n));
+        if (t) await tx.update(tasks).set({ type }).where(eq(tasks.id, t.id));
+      }
+
+      const doneCol = cols[cols.length - 1]!.id;
+      const [s1, s2, s3, s4] = await tx
+        .insert(sprints)
+        .values([
+          { organizationId: orgId, projectId, name: "Sprint 1", goal: "Ship workspace onboarding", startDate: day(-42), endDate: day(-29), status: "completed", committedPoints: 21, completedPoints: 18, startedAt: minutesAgo(60 * 24 * 42), completedAt: minutesAgo(60 * 24 * 29) },
+          { organizationId: orgId, projectId, name: "Sprint 2", goal: "Roles, invites and the activity log", startDate: day(-28), endDate: day(-15), status: "completed", committedPoints: 24, completedPoints: 22, startedAt: minutesAgo(60 * 24 * 28), completedAt: minutesAgo(60 * 24 * 15) },
+          { organizationId: orgId, projectId, name: "Sprint 3", goal: "Faster boards and enterprise sign-in", startDate: day(-6), endDate: day(7), status: "active", startedAt: minutesAgo(60 * 24 * 6) },
+          { organizationId: orgId, projectId, name: "Sprint 4", goal: "Billing and API hardening", startDate: day(8), endDate: day(21), status: "planned" },
+        ])
+        .returning();
+
+      // Active sprint: everything past Backlog plus the billing subtasks. Planned: two backlog stories.
+      const activeTasks = all.filter((t) => t.columnId !== cols[0]!.id || t.parentId);
+      for (const t of activeTasks) await tx.update(tasks).set({ sprintId: s3!.id }).where(eq(tasks.id, t.id));
+      for (const n of [2, 4]) {
+        const t = byNumber(n);
+        if (t) await tx.update(tasks).set({ sprintId: s4!.id }).where(eq(tasks.id, t.id));
+      }
+
+      const scopeNow = activeTasks.reduce((sum, t) => sum + (t.storyPoints ?? 0), 0);
+      const doneNow = activeTasks.filter((t) => t.columnId === doneCol).reduce((sum, t) => sum + (t.storyPoints ?? 0), 0);
+      const tasksNow = activeTasks.length;
+      const doneTasksNow = activeTasks.filter((t) => t.columnId === doneCol).length;
+      const creep = 3; // a 3-pointer joined on day 3
+      await tx.update(sprints).set({ committedPoints: scopeNow - creep }).where(eq(sprints.id, s3!.id));
+
+      const progress = [0, 0.15, 0.3, 0.35, 0.55, 0.8, 1]; // uneven, like real teams
+      await tx.insert(sprintSnapshots).values(
+        progress.map((f, i) => ({
+          organizationId: orgId,
+          sprintId: s3!.id,
+          day: day(i - 6),
+          scopePoints: i >= 3 ? scopeNow : scopeNow - creep,
+          completedPoints: Math.round(doneNow * f),
+          scopeTasks: i >= 3 ? tasksNow : tasksNow - 1,
+          completedTasks: Math.round(doneTasksNow * f),
+        }))
       );
+      // Historical sprints: start + end snapshots so their burndown has a shape.
+      for (const [sp, committed, completed, start, end] of [
+        [s1!, 21, 18, -42, -29],
+        [s2!, 24, 22, -28, -15],
+      ] as const) {
+        await tx.insert(sprintSnapshots).values([
+          { organizationId: orgId, sprintId: sp.id, day: day(start), scopePoints: committed, completedPoints: 0, scopeTasks: 8, completedTasks: 0 },
+          { organizationId: orgId, sprintId: sp.id, day: day(start + 7), scopePoints: committed, completedPoints: Math.round(completed * 0.45), scopeTasks: 8, completedTasks: 3 },
+          { organizationId: orgId, sprintId: sp.id, day: day(end), scopePoints: committed, completedPoints: completed, scopeTasks: 8, completedTasks: 7 },
+        ]);
+      }
+      await tx.insert(auditLogs).values([
+        { organizationId: orgId, actorId: mates[0]!.id, action: "SPRINT_COMPLETED", entityType: "sprint", entityId: s2!.id, metadata: { name: "Sprint 2", committedPoints: 24, completedPoints: 22, carriedOver: 1 }, createdAt: minutesAgo(60 * 24 * 15) },
+        { organizationId: orgId, actorId: mates[0]!.id, action: "SPRINT_STARTED", entityType: "sprint", entityId: s3!.id, metadata: { name: "Sprint 3", committedPoints: scopeNow - creep }, createdAt: minutesAgo(60 * 24 * 6) },
+      ]);
+    }
+
+    /** Phase 2 sample data: tags, a checklist, subtasks and dependencies on the ENG board. */
+    async function seedBreakdown(eng: (typeof tasks.$inferSelect)[], projectId: string, cols: (typeof boardColumns.$inferSelect)[]) {
+      const byNumber = (n: number) => eng.find((t) => t.taskNumber === n)!;
+      const tagRows = await tx
+        .insert(tags)
+        .values([
+          { organizationId: orgId, name: "Backend", color: "#3f7cb8" },
+          { organizationId: orgId, name: "Frontend", color: "#e44a8a" },
+          { organizationId: orgId, name: "Security", color: "#dd6b00" },
+          { organizationId: orgId, name: "Customer", color: "#0f9d74" },
+        ])
+        .returning();
+      const tag = (name: string) => tagRows.find((t) => t.name === name)!.id;
+      await tx.insert(taskTags).values(
+        (
+          [
+            [1, "Backend"], [1, "Customer"], [2, "Backend"], [4, "Backend"], [5, "Backend"], [5, "Customer"],
+            [6, "Security"], [7, "Frontend"], [8, "Security"], [8, "Backend"], [9, "Security"], [11, "Frontend"],
+          ] as const
+        ).map(([n, name]) => ({ organizationId: orgId, taskId: byNumber(n).id, tagId: tag(name) }))
+      );
+
+      // Checklist on the billing webhook task.
+      const billing = byNumber(1);
+      await tx.insert(checklistItems).values(
+        ["Verify webhook signatures", "Make handler idempotent", "Map Stripe customers to workspaces", "Add retry + dead-letter queue"].map((text, i) => ({
+          organizationId: orgId,
+          taskId: billing.id,
+          text,
+          done: i === 0,
+          position: (i + 1) * POSITION_STEP,
+        }))
+      );
+
+      // Two subtasks under the billing webhook (one already done).
+      const [counter] = await tx
+        .update(projects)
+        .set({ taskCounter: eng.length + 2 })
+        .where(eq(projects.id, projectId))
+        .returning({ n: projects.taskCounter });
+      await tx.insert(tasks).values([
+        {
+          organizationId: orgId, projectId, columnId: cols[cols.length - 1]!.id, parentId: billing.id,
+          taskNumber: counter!.n - 1, title: "Design webhook event schema", priority: "medium", position: 90 * POSITION_STEP,
+          assigneeId: billing.assigneeId, storyPoints: 2, createdAt: minutesAgo(60 * 24 * 6), updatedAt: minutesAgo(60 * 24 * 2),
+        },
+        {
+          organizationId: orgId, projectId, columnId: cols[1]!.id, parentId: billing.id,
+          taskNumber: counter!.n, title: "Handle invoice.paid events", priority: "high", position: 90 * POSITION_STEP,
+          assigneeId: billing.assigneeId, storyPoints: 3, createdAt: minutesAgo(60 * 24 * 5), updatedAt: minutesAgo(60 * 24),
+        },
+      ]);
+
+      // ENG-5 (in progress) blocks ENG-1; ENG-8 (review) blocks ENG-6.
+      await tx.insert(taskDependencies).values([
+        { organizationId: orgId, blockerId: byNumber(5).id, blockedId: billing.id },
+        { organizationId: orgId, blockerId: byNumber(8).id, blockedId: byNumber(6).id },
+      ]);
     }
 
     await tx.insert(auditLogs).values({

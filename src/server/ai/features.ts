@@ -81,7 +81,7 @@ export async function createSubtasks(
   subtasks: Subtask[]
 ) {
   const list = subtaskSchema.shape.subtasks.parse(subtasks);
-  const { task: parent, key } = await loadTask(conn, organizationId, parentTaskId);
+  const { task: parent } = await loadTask(conn, organizationId, parentTaskId);
   const created = [];
   // Subtasks land in the first column (Backlog) of the parent's board.
   const [backlog] = await conn
@@ -97,7 +97,8 @@ export async function createSubtasks(
         columnId: backlog!.id,
         title: s.title,
         priority: s.priority,
-        description: `Subtask of ${key}-${parent.taskNumber} · ${s.estimatedPoints} pts`,
+        parentId: parent.parentId ?? parent.id, // stay one level deep
+        storyPoints: s.estimatedPoints,
       })
     );
   }
@@ -237,7 +238,7 @@ export async function triageTask(
       priority: heuristicPriority(`${input.title} ${input.description ?? ""}`),
       column: titles[0],
       labels: [],
-      rationale: "Keyword-based suggestion (AI unavailable).",
+      rationale: "Suggested from keywords in the title.",
     }),
     allow: () => consumeAiQuota(conn, organizationId),
   });

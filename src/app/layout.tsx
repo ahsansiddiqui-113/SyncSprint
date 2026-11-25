@@ -5,8 +5,8 @@ import { Toaster } from "sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SyncSprint — real-time multi-tenant sprint board",
-  description: "Multi-tenant Kanban with RBAC, real-time sync, optimistic concurrency and free-tier AI.",
+  title: "SyncSprint — plan, track and ship work together",
+  description: "Boards, lists, calendars, timelines and dashboards for your team — always in sync, with an AI assistant built in.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

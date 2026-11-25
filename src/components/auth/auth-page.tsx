@@ -7,9 +7,9 @@ import { Logo } from "@/components/ui/card";
 import { isGoogleEnabled } from "@/lib/auth";
 
 const POINTS = [
-  "Isolated workspaces with owner, admin, member and viewer roles",
-  "Live presence and conflict-safe drag-and-drop",
-  "AI subtasks, triage and standup digests",
+  "Boards, lists, calendars, timelines and dashboards",
+  "See teammates' changes the moment they happen",
+  "An AI assistant that helps you plan and prioritize",
 ];
 
 export function AuthPage({ mode }: { mode: "sign-in" | "sign-up" }) {
@@ -32,7 +32,7 @@ export function AuthPage({ mode }: { mode: "sign-in" | "sign-up" }) {
             ))}
           </ul>
         </div>
-        <p className="relative text-[14px] text-white/70">Passwords are hashed by Better Auth; sessions are httpOnly cookies.</p>
+        <p className="relative text-[14px] text-white/70">© {new Date().getFullYear()} SyncSprint</p>
       </div>
 
       <div className="flex flex-col items-center justify-center gap-8 bg-canvas px-6 py-12">

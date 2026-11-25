@@ -8,6 +8,34 @@
       "when": 1795614585464,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795631394539,
+      "tag": "0001_planning_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795632611597,
+      "tag": "0002_work_breakdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795633635373,
+      "tag": "0003_sprints",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795634524789,
+      "tag": "0004_customization_capacity",
+      "breakpoints": true
     }
   ]
 }

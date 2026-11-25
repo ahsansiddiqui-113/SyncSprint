@@ -12,14 +12,31 @@ export type DB = PgDatabase<PgQueryResultHKT, Schema, ExtractTablesWithRelations
 export type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
 export type DbOrTx = DB | Tx;
 
+/**
+ * Underlying driver handles, so the process can shut them down cleanly. Lives on
+ * globalThis: server.ts and the Next.js bundle load separate copies of this module.
+ */
+const closers: Set<() => Promise<void>> = ((globalThis as { __syncsprintDbClosers?: Set<() => Promise<void>> }).__syncsprintDbClosers ??= new Set());
+
 export function createDb(url: string): DB {
   if (url.startsWith("pglite://")) {
     const dir = url.slice("pglite://".length);
     const client = dir === "memory" ? new PGlite() : new PGlite(dir);
+    closers.add(() => client.close());
     return drizzlePglite(client, { schema }) as unknown as DB;
   }
   const client = postgres(url, { max: 10, prepare: false });
+  closers.add(() => client.end({ timeout: 5 }));
   return drizzlePostgres(client, { schema }) as unknown as DB;
+}
+
+/**
+ * Close every connection. For on-disk PGlite this writes a final checkpoint;
+ * skipping it (a hard kill) can leave the data dir unable to restart.
+ */
+export async function closeDb() {
+  await Promise.allSettled([...closers].map((close) => close()));
+  closers.clear();
 }
 
 // The custom server (server.ts) and the Next.js bundle are separate module graphs

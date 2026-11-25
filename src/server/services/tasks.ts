@@ -14,8 +14,31 @@ import {
 import { AppError } from "@/lib/errors";
 import { MIN_GAP, POSITION_STEP, rebalancePositions } from "@/lib/fractional-index";
 import { requireOrgPermission } from "@/lib/rbac";
+import { assertAssignableSprint, recordSprintSnapshots } from "./sprints";
+
+export const workItemTypeSchema = z.enum(["epic", "story", "task", "bug"]);
 
 export const prioritySchema = z.enum(["low", "medium", "high", "urgent"]);
+
+/** Calendar date "YYYY-MM-DD" (date-only; validated as a real date). */
+export const dateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
+  .refine((d) => {
+    const t = new Date(`${d}T00:00:00Z`);
+    return !Number.isNaN(t.getTime()) && t.toISOString().startsWith(d);
+  }, "Invalid date");
+export const pointsSchema = z.number().int().min(0).max(100);
+/** Hours, in quarter-hour steps, up to 1,000. */
+export const estimateSchema = z
+  .number()
+  .min(0)
+  .max(1000)
+  .refine((n) => Math.abs(n * 4 - Math.round(n * 4)) < 1e-9, "Use quarter-hour steps");
+
+function assertDateOrder(start: string | null | undefined, due: string | null | undefined) {
+  if (start && due && start > due) throw new AppError("VALIDATION", "Start date must be on or before the due date");
+}
 
 /* ------------------------------- helpers -------------------------------- */
 
@@ -84,14 +107,34 @@ export const createTaskInput = z.object({
   description: z.string().max(10_000).nullish(),
   priority: prioritySchema.default("medium"),
   assigneeId: z.string().uuid().nullish(),
+  startDate: dateSchema.nullish(),
+  dueDate: dateSchema.nullish(),
+  storyPoints: pointsSchema.nullish(),
+  estimateHours: estimateSchema.nullish(),
+  parentId: z.string().uuid().nullish(),
+  type: workItemTypeSchema.default("task"),
+  sprintId: z.string().uuid().nullish(),
 });
 
 export async function createTask(conn: DB, actorId: string, raw: z.input<typeof createTaskInput>) {
   const input = createTaskInput.parse(raw);
   await requireOrgPermission(actorId, input.organizationId, "member", conn);
+  assertDateOrder(input.startDate, input.dueDate);
 
   return conn.transaction(async (tx) => {
     const col = await assertColumnInOrg(tx, input.organizationId, input.columnId);
+    if (input.sprintId) await assertAssignableSprint(tx, input.organizationId, col.projectId, input.sprintId);
+    if (input.parentId) {
+      const [parent] = await tx
+        .select({ projectId: tasks.projectId, parentId: tasks.parentId })
+        .from(tasks)
+        .where(and(eq(tasks.id, input.parentId), eq(tasks.organizationId, input.organizationId)))
+        .limit(1);
+      // Another tenant's id looks exactly like a missing one.
+      if (!parent) throw new AppError("NOT_FOUND", "Parent task not found");
+      if (parent.parentId) throw new AppError("VALIDATION", "Subtasks can't have their own subtasks");
+      if (parent.projectId !== col.projectId) throw new AppError("VALIDATION", "A subtask must be in the same project as its parent");
+    }
     await assertAssigneeInOrg(tx, input.organizationId, input.assigneeId);
 
     // Atomic counter → ENG-1, ENG-2… without a MAX()+1 race.
@@ -120,6 +163,13 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
         description: input.description ?? null,
         priority: input.priority,
         assigneeId: input.assigneeId ?? null,
+        startDate: input.startDate ?? null,
+        dueDate: input.dueDate ?? null,
+        storyPoints: input.storyPoints ?? null,
+        estimateHours: input.estimateHours ?? null,
+        parentId: input.parentId ?? null,
+        type: input.type,
+        sprintId: input.sprintId ?? null,
         position: (last?.position ?? 0) + POSITION_STEP,
       })
       .returning();
@@ -130,8 +180,9 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
       action: "TASK_CREATED",
       entityType: "task",
       entityId: task!.id,
-      metadata: { ref: `${project.key}-${task!.taskNumber}`, title: task!.title, columnId: input.columnId },
+      metadata: { ref: `${project.key}-${task!.taskNumber}`, title: task!.title, columnId: input.columnId, parentId: input.parentId ?? null },
     });
+    await recordSprintSnapshots(tx, input.organizationId, [task!.sprintId]);
     return task!;
   });
 }
@@ -216,6 +267,7 @@ export async function moveTask(conn: DB, actorId: string, raw: z.input<typeof mo
       },
     });
 
+    await recordSprintSnapshots(tx, input.organizationId, [updated.sprintId]);
     return { ok: true as const, task: finalTask, rebalanced };
   });
 }
@@ -232,6 +284,12 @@ export const updateTaskInput = z.object({
       description: z.string().max(10_000).nullable(),
       priority: prioritySchema,
       assigneeId: z.string().uuid().nullable(),
+      startDate: dateSchema.nullable(),
+      dueDate: dateSchema.nullable(),
+      storyPoints: pointsSchema.nullable(),
+      estimateHours: estimateSchema.nullable(),
+      type: workItemTypeSchema,
+      sprintId: z.string().uuid().nullable(),
     })
     .partial(),
 });
@@ -251,6 +309,12 @@ export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof 
       .where(and(eq(tasks.id, input.taskId), eq(tasks.organizationId, input.organizationId)))
       .limit(1);
     if (!before) throw new AppError("NOT_FOUND", "Task not found");
+    // Validate the merged result, so editing only the due date can't put it before an existing start.
+    assertDateOrder(
+      input.patch.startDate !== undefined ? input.patch.startDate : before.startDate,
+      input.patch.dueDate !== undefined ? input.patch.dueDate : before.dueDate
+    );
+    if (input.patch.sprintId) await assertAssignableSprint(tx, input.organizationId, before.projectId, input.patch.sprintId);
 
     const [updated] = await tx
       .update(tasks)
@@ -280,6 +344,8 @@ export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof 
       entityId: updated.id,
       metadata: { changes, version: updated.version },
     });
+    // Points or sprint membership changes move burndown lines (old and new sprint).
+    await recordSprintSnapshots(tx, input.organizationId, [before.sprintId, updated.sprintId]);
     return { ok: true as const, task: updated, changes: Object.keys(changes) };
   });
 }
@@ -302,6 +368,7 @@ export async function deleteTask(conn: DB, actorId: string, organizationId: stri
       entityId: deleted.id,
       metadata: { title: deleted.title, taskNumber: deleted.taskNumber },
     });
+    await recordSprintSnapshots(tx, organizationId, [deleted.sprintId]);
     return deleted;
   });
 }

@@ -1,0 +1,4 @@
+# Normalize line endings (stops CRLF churn on Windows checkouts)
+* text=auto eol=lf
+*.png binary
+*.ico binary
