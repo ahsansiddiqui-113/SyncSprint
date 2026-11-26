@@ -41,7 +41,7 @@ export function CommentBody({ body, meId }: { body: string; meId: string }) {
             key={i}
             className={cn(
               "rounded px-1 py-px font-medium",
-              p.userId === meId.toLowerCase() ? "bg-amber-100 text-amber-900" : "bg-primary-soft text-primary"
+              p.userId === meId.toLowerCase() ? "bg-amber-100 text-amber-900" : p.userId.startsWith("team:") ? "bg-sky-100 text-sky-900" : "bg-primary-soft text-primary"
             )}
           >
             @{p.name}
@@ -63,10 +63,14 @@ export function CommentComposer({ ctx, onSend, pending }: { ctx: BoardCtx; onSen
   const suggestions = useMemo(() => {
     if (query === null) return [];
     const q = query.toLowerCase();
-    return ctx.members
+    const groups = (ctx.teams ?? [])
+      .filter((t) => q === "" || t.handle.startsWith(q) || t.name.toLowerCase().startsWith(q))
+      .map((t) => ({ id: `team:${t.id}`, name: t.name, avatarUrl: null, role: `group · @${t.handle}`, color: t.color }));
+    const people = ctx.members
       .filter((m) => m.id !== ctx.me.id && (q === "" || m.name.toLowerCase().split(/\s+/).some((w) => w.startsWith(q)) || m.name.toLowerCase().startsWith(q)))
-      .slice(0, 6);
-  }, [query, ctx.members, ctx.me.id]);
+      .map((m) => ({ ...m, color: null as string | null, role: m.role === "owner" ? "admin" : (m.role as string) }));
+    return [...groups.slice(0, 3), ...people].slice(0, 7);
+  }, [query, ctx.members, ctx.me.id, ctx.teams]);
 
   function refreshQuery(value: string, caret: number) {
     const q = activeMentionQuery(value.slice(0, caret));
@@ -147,7 +151,11 @@ export function CommentComposer({ ctx, onSend, pending }: { ctx: BoardCtx; onSen
               onMouseEnter={() => setIndex(i)}
               className={cn("flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[15px]", i === index && "bg-primary-soft")}
             >
-              <Avatar id={m.id} name={m.name} src={m.avatarUrl} size={24} />
+              {m.color ? (
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white" style={{ backgroundColor: m.color }}>{m.name.slice(0, 2).toUpperCase()}</span>
+              ) : (
+                <Avatar id={m.id} name={m.name} src={m.avatarUrl} size={24} />
+              )}
               <span className="flex-1 truncate">{m.name}</span>
               <span className="text-[12.5px] capitalize text-subtle">{m.role}</span>
             </button>

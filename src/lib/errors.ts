@@ -10,7 +10,11 @@ export type AppErrorCode =
   | "VALIDATION"
   | "CONFLICT"
   | "VERSION_CONFLICT"
-  | "QUOTA_EXCEEDED";
+  | "QUOTA_EXCEEDED"
+  /** Billing: the workspace is read-only (trial over, payment overdue) or locked. */
+  | "WORKSPACE_READ_ONLY"
+  | "WORKSPACE_LOCKED"
+  | "SEAT_LIMIT";
 
 /** Errors whose `code` is safe to show to the client. */
 import { ZodError } from "zod";

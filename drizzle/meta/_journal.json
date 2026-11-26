@@ -50,6 +50,13 @@
       "when": 1795677088681,
       "tag": "0006_automation_api",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795691462734,
+      "tag": "0007_billing_groups_sharing",
+      "breakpoints": true
     }
   ]
 }

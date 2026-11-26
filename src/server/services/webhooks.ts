@@ -4,7 +4,8 @@ import { isIP } from "node:net";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
-import { auditLogs, webhookDeliveries, webhooks } from "@/db/schema";
+import { auditLogs, organizations, webhookDeliveries, webhooks } from "@/db/schema";
+import { billingState } from "@/lib/billing-rules";
 import { AppError } from "@/lib/errors";
 import { requireOrgPermission } from "@/lib/rbac";
 
@@ -189,6 +190,9 @@ export async function dispatchEvent(conn: DB, organizationId: string, event: Web
   const hooks = await conn.select().from(webhooks).where(and(eq(webhooks.organizationId, organizationId), eq(webhooks.enabled, true)));
   const targets = hooks.filter((h) => h.events.includes(event));
   if (!targets.length) return [];
+  // Integrations pause while a workspace is read-only or locked for billing.
+  const [org] = await conn.select().from(organizations).where(eq(organizations.id, organizationId)).limit(1);
+  if (!org || billingState(org).access !== "full") return [];
   const payload = typeof data === "function" ? await (data as () => Promise<unknown>)() : data;
   return Promise.all(targets.map((h) => deliver(conn, h, event, payload, fetcher)));
 }

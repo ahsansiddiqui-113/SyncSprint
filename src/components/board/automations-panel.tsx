@@ -46,7 +46,7 @@ function describe(ctx: BoardCtx, tags: Tag[], d: Draft) {
         : t.kind === "assignee_changed" ? "the assignee changes"
           : `priority changes to ${t.to ?? "anything"}`;
   const cond = d.conditions.map((c) => {
-    const v = c.field === "assignee" ? person(c.value) : c.field === "tag" ? (tags.find((x) => x.id === c.value)?.name ?? "a tag") : c.value;
+    const v = c.field === "assignee" ? person(c.value) : c.field === "tag" ? (tags.find((x) => x.id === c.value)?.name ?? "a tag") : c.field === "team" ? (c.value ? (ctx.teams.find((t) => t.id === c.value)?.name ?? "a deleted group") : "no group") : c.value;
     return `${c.field} ${c.op === "is" ? (c.field === "tag" ? "includes" : "is") : c.field === "tag" ? "doesn't include" : "isn't"} ${v}`;
   });
   const then = d.actions.map((a) => {
@@ -55,6 +55,7 @@ function describe(ctx: BoardCtx, tags: Tag[], d: Draft) {
       case "set_assignee": return a.userId ? `assign to ${person(a.userId)}` : "unassign";
       case "set_priority": return `set priority ${a.priority}`;
       case "add_tag": return `tag ${tags.find((x) => x.id === a.tagId)?.name ?? "(deleted tag)"}`;
+      case "assign_to_team": return a.teamId ? `send to ${ctx.teams.find((t) => t.id === a.teamId)?.name ?? "a deleted group"}` : "remove from its group";
       case "set_due_in_days": return a.days === 0 ? "make it due today" : `make it due in ${a.days} day${a.days === 1 ? "" : "s"}`;
       case "add_comment": return "post a comment";
       case "notify": return a.target === "user" ? `notify ${person(a.userId)}` : `notify the ${a.target === "assignee" ? "assignees" : "watchers"}`;
@@ -305,6 +306,7 @@ function Editor({ ctx, tags, initial, onCancel, onSaved }: { ctx: BoardCtx; tags
                 <option value="type">Type</option>
                 <option value="assignee">Assignee</option>
                 <option value="tag">Tag</option>
+                <option value="team">Group</option>
               </Select>
               <Select aria-label="Operator" value={c.op} onChange={(e) => set({ conditions: d.conditions.map((x, j) => (j === i ? { ...x, op: e.target.value as never } : x)) })}>
                 <option value="is">{c.field === "tag" ? "includes" : "is"}</option>
@@ -315,6 +317,7 @@ function Editor({ ctx, tags, initial, onCancel, onSaved }: { ctx: BoardCtx; tags
                 {c.field === "type" && <><option value="">Choose…</option>{TYPES.map((p) => <option key={p} value={p}>{p}</option>)}</>}
                 {c.field === "assignee" && <><option value="">Unassigned</option>{people}</>}
                 {c.field === "tag" && <><option value="">Choose…</option>{tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</>}
+                {c.field === "team" && <><option value="">No group</option>{ctx.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</>}
               </Select>
               <RemoveBtn onClick={() => set({ conditions: d.conditions.filter((_, j) => j !== i) })} />
             </div>
@@ -337,6 +340,7 @@ function Editor({ ctx, tags, initial, onCancel, onSaved }: { ctx: BoardCtx; tags
                     <option value="set_assignee">Change assignee</option>
                     <option value="set_priority">Set priority</option>
                     <option value="add_tag">Add a tag</option>
+                    <option value="assign_to_team">Send to a group</option>
                     <option value="set_due_in_days">Set due date</option>
                     <option value="add_comment">Post a comment</option>
                     <option value="notify">Send a notification</option>
@@ -361,6 +365,14 @@ function Editor({ ctx, tags, initial, onCancel, onSaved }: { ctx: BoardCtx; tags
                     tags.length ? (
                       <Select aria-label="Tag" value={a.tagId} onChange={(e) => upd({ ...a, tagId: e.target.value })}>{tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select>
                     ) : <p className="text-[13.5px] text-subtle">Create a tag on any task first.</p>
+                  )}
+                  {a.type === "assign_to_team" && (
+                    ctx.teams.length ? (
+                      <Select aria-label="Group" value={a.teamId ?? ""} onChange={(e) => upd({ ...a, teamId: e.target.value || null })}>
+                        <option value="">Remove from its group</option>
+                        {ctx.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </Select>
+                    ) : <p className="text-[13.5px] text-subtle">Create a group first (Groups in the sidebar).</p>
                   )}
                   {a.type === "set_due_in_days" && (
                     <div className="flex items-center gap-2 text-[14.5px]">
@@ -412,6 +424,7 @@ function defaultAction(ctx: BoardCtx, tags: Tag[], type: AutomationAction["type"
     case "set_assignee": return { type, userId: "actor" };
     case "set_priority": return { type, priority: "high" };
     case "add_tag": return { type, tagId: tags[0]?.id ?? "" };
+    case "assign_to_team": return { type, teamId: ctx.teams[0]?.id ?? null };
     case "set_due_in_days": return { type, days: 3 };
     case "add_comment": return { type, body: "" };
     case "notify": return { type, target: "assignee", message: "" };

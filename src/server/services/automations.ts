@@ -9,6 +9,7 @@ import {
   orgMembers,
   projects,
   tags,
+  teams,
   taskComments,
   taskTags,
   tasks,
@@ -45,7 +46,7 @@ export const triggerSchema: z.ZodType<AutomationTrigger> = z.discriminatedUnion(
 ]);
 
 export const conditionSchema: z.ZodType<AutomationCondition> = z.object({
-  field: z.enum(["priority", "type", "assignee", "tag"]),
+  field: z.enum(["priority", "type", "assignee", "tag", "team"]),
   op: z.enum(["is", "is_not"]),
   value: z.string().max(60).nullable(),
 });
@@ -55,6 +56,7 @@ export const actionSchema: z.ZodType<AutomationAction> = z.discriminatedUnion("t
   z.object({ type: z.literal("set_assignee"), userId: z.union([uuid, z.literal("actor")]).nullable() }),
   z.object({ type: z.literal("set_priority"), priority: z.enum(PRIORITIES) }),
   z.object({ type: z.literal("add_tag"), tagId: uuid }),
+  z.object({ type: z.literal("assign_to_team"), teamId: uuid.nullable() }),
   z.object({ type: z.literal("set_due_in_days"), days: z.number().int().min(0).max(365) }),
   z.object({ type: z.literal("add_comment"), body: z.string().trim().min(1).max(1000) }),
   z.object({
@@ -90,6 +92,10 @@ async function validateRefs(conn: DbOrTx, organizationId: string, projectId: str
     ...a.actions.flatMap((x) => (x.type === "set_assignee" && x.userId && x.userId !== "actor" ? [x.userId] : x.type === "notify" && x.target === "user" && x.userId ? [x.userId] : [])),
     ...a.conditions.flatMap((c) => (c.field === "assignee" && c.value ? [c.value] : [])),
   ];
+  const teamIds = [
+    ...a.actions.flatMap((x) => (x.type === "assign_to_team" && x.teamId ? [x.teamId] : [])),
+    ...a.conditions.flatMap((c) => (c.field === "team" && c.value ? [c.value] : [])),
+  ];
   const tagIds = [
     ...a.actions.flatMap((x) => (x.type === "add_tag" ? [x.tagId] : [])),
     ...a.conditions.flatMap((c) => (c.field === "tag" && c.value ? [c.value] : [])),
@@ -98,6 +104,7 @@ async function validateRefs(conn: DbOrTx, organizationId: string, projectId: str
     if (c.field === "priority" && !PRIORITIES.includes(c.value as never)) throw new AppError("VALIDATION", "Pick a priority for the condition");
     if (c.field === "type" && !["epic", "story", "task", "bug"].includes(c.value ?? "")) throw new AppError("VALIDATION", "Pick a work item type for the condition");
     if (c.field === "tag" && !c.value) throw new AppError("VALIDATION", "Pick a tag for the condition");
+    if (c.field === "team" && c.value && !/^[0-9a-f-]{36}$/i.test(c.value)) throw new AppError("VALIDATION", "Pick a group for the condition");
     if (c.field === "assignee" && c.value && !/^[0-9a-f-]{36}$/i.test(c.value)) throw new AppError("VALIDATION", "Pick a person for the condition");
   }
   for (const x of a.actions) if (x.type === "notify" && x.target === "user" && !x.userId) throw new AppError("VALIDATION", "Pick who to notify");
@@ -109,6 +116,10 @@ async function validateRefs(conn: DbOrTx, organizationId: string, projectId: str
   if (userIds.length) {
     const found = await conn.select({ id: orgMembers.userId }).from(orgMembers).where(and(eq(orgMembers.organizationId, organizationId), inArray(orgMembers.userId, userIds)));
     if (found.length !== new Set(userIds).size) throw new AppError("VALIDATION", "Everyone in an automation must be in this workspace");
+  }
+  if (teamIds.length) {
+    const found = await conn.select({ id: teams.id }).from(teams).where(and(eq(teams.organizationId, organizationId), inArray(teams.id, teamIds)));
+    if (found.length !== new Set(teamIds).size) throw new AppError("VALIDATION", "A group in this automation doesn't exist");
   }
   if (tagIds.length) {
     const found = await conn.select({ id: tags.id }).from(tags).where(and(eq(tags.organizationId, organizationId), inArray(tags.id, tagIds)));
@@ -211,6 +222,7 @@ async function conditionsHold(tx: DbOrTx, task: Task, conditions: AutomationCond
     if (c.field === "priority") actual = task.priority === c.value;
     else if (c.field === "type") actual = task.type === c.value;
     else if (c.field === "assignee") actual = (task.assigneeId ?? null) === (c.value ?? null);
+    else if (c.field === "team") actual = (task.teamId ?? null) === (c.value ?? null);
     else {
       const [hit] = await tx.select({ id: taskTags.tagId }).from(taskTags).where(and(eq(taskTags.taskId, task.id), eq(taskTags.tagId, c.value ?? ""))).limit(1);
       actual = !!hit;
@@ -263,6 +275,16 @@ export async function runAutomations(
         }
         patch.assigneeId = target ?? null;
         done.push(target ? "assigned" : "unassigned");
+      } else if (a.type === "assign_to_team") {
+        if (a.teamId) {
+          const [tm] = await tx.select({ id: teams.id, name: teams.name }).from(teams).where(and(eq(teams.id, a.teamId), eq(teams.organizationId, organizationId))).limit(1);
+          if (!tm) { failure = "its group was deleted"; break; }
+          patch.teamId = tm.id;
+          done.push(`sent to ${tm.name}`);
+        } else {
+          patch.teamId = null;
+          done.push("removed from its group");
+        }
       } else if (a.type === "set_priority") {
         patch.priority = a.priority;
         done.push(`priority ${a.priority}`);

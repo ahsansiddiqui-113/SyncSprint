@@ -29,6 +29,9 @@ export const notificationKindEnum = pgEnum("notification_kind", ["mention", "ass
 export const keyResultKindEnum = pgEnum("key_result_kind", ["number", "tasks"]);
 export const recurrenceFrequencyEnum = pgEnum("recurrence_frequency", ["daily", "weekdays", "weekly", "monthly"]);
 export const apiKeyScopeEnum = pgEnum("api_key_scope", ["read", "write"]);
+/** trial: 14-day free trial · payg: monthly per active user · team: yearly, up to 50 · business: yearly, 51-100 · comped: free, granted by the platform owner */
+export const planEnum = pgEnum("plan", ["trial", "payg", "team", "business", "comped"]);
+export const billingStatusEnum = pgEnum("billing_status", ["trialing", "active", "past_due", "canceled", "suspended"]);
 
 /** Postgres bytea for small attachments (kept in the database so serverless hosts need no extra storage). */
 const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
@@ -123,9 +126,28 @@ export const organizations = pgTable(
     name: varchar("name", { length: 120 }).notNull(),
     slug: varchar("slug", { length: 80 }).notNull(),
     isDemo: boolean("is_demo").default(false).notNull(),
+    // ---- billing (src/lib/billing-rules.ts turns these into an access level) ----
+    plan: planEnum("plan").default("trial").notNull(),
+    billingStatus: billingStatusEnum("billing_status").default("trialing").notNull(),
+    trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+    /** Paid through this moment (from the payment provider). */
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").default(false).notNull(),
+    /** When a failed payment's grace ends (full access until then). */
+    graceEndsAt: timestamp("grace_ends_at", { withTimezone: true }),
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    suspendedReason: varchar("suspended_reason", { length: 200 }),
+    /** Seats paid for on the current subscription. */
+    seatsPurchased: integer("seats_purchased"),
+    /** First moment billable members exceeded the plan limit (7-day grace for new invites). */
+    seatOverageSince: timestamp("seat_overage_since", { withTimezone: true }),
+    polarCustomerId: varchar("polar_customer_id", { length: 80 }),
+    polarSubscriptionId: varchar("polar_subscription_id", { length: 80 }),
+    /** Customer admins can let the platform owner look in (read-only) until this time. */
+    supportAccessUntil: timestamp("support_access_until", { withTimezone: true }),
     ...timestamps,
   },
-  (t) => [uniqueIndex("orgs_slug_idx").on(t.slug)]
+  (t) => [uniqueIndex("orgs_slug_idx").on(t.slug), index("orgs_polar_sub_idx").on(t.polarSubscriptionId)]
 );
 
 // 3. Memberships — the single source of truth for RBAC.
@@ -230,6 +252,8 @@ export const tasks = pgTable(
     type: workItemTypeEnum("type").default("task").notNull(),
     // Removing a sprint sends its tasks back to the backlog.
     sprintId: uuid("sprint_id").references((): AnyPgColumn => sprints.id, { onDelete: "set null" }),
+    /** Assigned to a group (QA, Devs...): sits in that group's queue until someone takes it. */
+    teamId: uuid("team_id").references((): AnyPgColumn => teams.id, { onDelete: "set null" }),
     columnId: uuid("column_id")
       .notNull()
       .references(() => boardColumns.id, { onDelete: "cascade" }),
@@ -709,12 +733,13 @@ export type AutomationTrigger =
   | { kind: "status_changed"; toColumnId: string | null }
   | { kind: "assignee_changed" }
   | { kind: "priority_changed"; to: "low" | "medium" | "high" | "urgent" | null };
-export type AutomationCondition = { field: "priority" | "type" | "assignee" | "tag"; op: "is" | "is_not"; value: string | null };
+export type AutomationCondition = { field: "priority" | "type" | "assignee" | "tag" | "team"; op: "is" | "is_not"; value: string | null };
 export type AutomationAction =
   | { type: "move_to_status"; columnId: string }
   | { type: "set_assignee"; userId: string | "actor" | null }
   | { type: "set_priority"; priority: "low" | "medium" | "high" | "urgent" }
   | { type: "add_tag"; tagId: string }
+  | { type: "assign_to_team"; teamId: string | null }
   | { type: "set_due_in_days"; days: number }
   | { type: "add_comment"; body: string }
   | { type: "notify"; target: "assignee" | "watchers" | "user"; userId?: string | null; message: string };
@@ -844,6 +869,84 @@ export const webhookDeliveries = pgTable(
   (t) => [index("webhook_deliveries_idx").on(t.webhookId, t.createdAt)]
 );
 
+// 7q. Groups (teams): QA, Developers, Marketing... with an optional lead
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 60 }).notNull(),
+    /** Short handle for @mentions, e.g. "qa" for @qa. */
+    handle: varchar("handle", { length: 40 }).notNull(),
+    color: varchar("color", { length: 7 }).notNull(),
+    description: varchar("description", { length: 300 }),
+    leadId: uuid("lead_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("teams_org_handle_idx").on(t.organizationId, t.handle), uniqueIndex("teams_org_name_idx").on(t.organizationId, t.name)]
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    ...timestamps,
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index("team_members_user_idx").on(t.organizationId, t.userId)]
+);
+
+// 7r. Read-only share links (no sign-in). Only a hash of the token is stored.
+export const shareLinks = pgTable(
+  "share_links",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** null = the whole workspace (an admin must opt in). */
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    label: varchar("label", { length: 80 }).notNull(),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    passwordHash: varchar("password_hash", { length: 200 }),
+    includeComments: boolean("include_comments").default(false).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    viewCount: integer("view_count").default(0).notNull(),
+    lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("share_links_hash_idx").on(t.tokenHash), index("share_links_org_idx").on(t.organizationId)]
+);
+
+// 7s. Billing event log: payment-provider webhooks (idempotent by externalId) and platform-owner actions.
+export const billingEvents = pgTable(
+  "billing_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "set null" }),
+    source: varchar("source", { length: 20 }).notNull(),
+    type: varchar("type", { length: 80 }).notNull(),
+    /** Provider event id (webhook-id header): makes webhook handling idempotent. */
+    externalId: varchar("external_id", { length: 120 }),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    summary: varchar("summary", { length: 300 }),
+    payload: jsonb("payload").$type<Record<string, unknown>>(),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("billing_events_external_idx").on(t.externalId), index("billing_events_org_idx").on(t.organizationId, t.createdAt)]
+);
+
 // 8. Task comments
 export const taskComments = pgTable(
   "task_comments",
@@ -927,3 +1030,7 @@ export type Automation = typeof automations.$inferSelect;
 export type RecurrenceFrequency = (typeof recurrenceFrequencyEnum.enumValues)[number];
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type Webhook = typeof webhooks.$inferSelect;
+export type Plan = (typeof planEnum.enumValues)[number];
+export type BillingStatus = (typeof billingStatusEnum.enumValues)[number];
+export type Team = typeof teams.$inferSelect;
+export type ShareLink = typeof shareLinks.$inferSelect;

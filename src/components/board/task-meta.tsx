@@ -1,4 +1,4 @@
-import { Ban, Bookmark, Bug, CalendarDays, CornerDownRight, GitBranch, ListChecks, Repeat, SquareCheck, Zap } from "lucide-react";
+import { Ban, Bookmark, Bug, CalendarDays, CornerDownRight, GitBranch, ListChecks, Repeat, SquareCheck, UsersRound, Zap } from "lucide-react";
 import type { WorkItemType } from "@/db/schema";
 import { dueState, relativeDueLabel, type DueState } from "@/lib/dates";
 import { cn } from "@/lib/utils";
@@ -91,7 +91,8 @@ export function BreakdownBadges({ taskId, decor, maxTags = 3, className }: { tas
   const subs = decor.subtasks.get(taskId);
   const blockers = decor.openBlockers.get(taskId)?.length ?? 0;
   const repeat = decor.recurrences?.[taskId];
-  if (!tags.length && !check && !subs && !blockers && !repeat) return null;
+  const team = decor.teamByTask?.get(taskId);
+  if (!tags.length && !check && !subs && !blockers && !repeat && !team) return null;
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
       {blockers > 0 && (
@@ -100,6 +101,11 @@ export function BreakdownBadges({ taskId, decor, maxTags = 3, className }: { tas
           className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-1.5 py-0.5 text-[12.5px] font-semibold text-red-600"
         >
           <Ban className="h-3.5 w-3.5" /> Blocked
+        </span>
+      )}
+      {team && (
+        <span title={`Group: ${team.name}`} className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[12.5px] font-semibold" style={{ color: team.color, borderColor: `${team.color}55`, backgroundColor: `${team.color}12` }}>
+          <UsersRound className="h-3.5 w-3.5" /> {team.name}
         </span>
       )}
       {repeat && (

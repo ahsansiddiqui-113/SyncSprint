@@ -17,6 +17,7 @@ import { MIN_GAP, POSITION_STEP, rebalancePositions } from "@/lib/fractional-ind
 import { requireOrgPermission } from "@/lib/rbac";
 import { assertAssignableSprint, recordSprintSnapshots } from "./sprints";
 import { notifyComment } from "./notifications";
+import { assertTeamInOrg } from "./teams";
 import { afterTaskChange, newEffects, type Effects } from "./task-effects";
 
 export const workItemTypeSchema = z.enum(["epic", "story", "task", "bug"]);
@@ -117,6 +118,7 @@ export const createTaskInput = z.object({
   parentId: z.string().uuid().nullish(),
   type: workItemTypeSchema.default("task"),
   sprintId: z.string().uuid().nullish(),
+  teamId: z.string().uuid().nullish(),
 });
 
 export async function createTask(conn: DB, actorId: string, raw: z.input<typeof createTaskInput>, fx: Effects = newEffects()) {
@@ -139,6 +141,7 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
       if (parent.projectId !== col.projectId) throw new AppError("VALIDATION", "A subtask must be in the same project as its parent");
     }
     await assertAssigneeInOrg(tx, input.organizationId, input.assigneeId);
+    await assertTeamInOrg(tx, input.organizationId, input.teamId);
 
     // Atomic counter → ENG-1, ENG-2… without a MAX()+1 race.
     const [project] = await tx
@@ -173,6 +176,7 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
         parentId: input.parentId ?? null,
         type: input.type,
         sprintId: input.sprintId ?? null,
+        teamId: input.teamId ?? null,
         position: (last?.position ?? 0) + POSITION_STEP,
       })
       .returning();
@@ -296,6 +300,7 @@ export const updateTaskInput = z.object({
       estimateHours: estimateSchema.nullable(),
       type: workItemTypeSchema,
       sprintId: z.string().uuid().nullable(),
+      teamId: z.string().uuid().nullable(),
     })
     .partial(),
 });
@@ -308,6 +313,7 @@ export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof 
 
   return conn.transaction(async (tx) => {
     await assertAssigneeInOrg(tx, input.organizationId, input.patch.assigneeId);
+    await assertTeamInOrg(tx, input.organizationId, input.patch.teamId);
 
     const [before] = await tx
       .select()

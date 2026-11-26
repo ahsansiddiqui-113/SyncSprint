@@ -15,6 +15,7 @@ import {
 } from "@/db/schema";
 import { requireOrgPermission } from "@/lib/rbac";
 import { MENTION_SOURCE } from "@/lib/mentions";
+import { teamMemberIds } from "./teams";
 
 /**
  * In-app notifications. Rules:
@@ -137,6 +138,13 @@ export function extractMentions(body: string): string[] {
   return [...ids];
 }
 
+/** Group mentions (team:uuid) become every member of that group, within this workspace only. */
+async function expandMentions(conn: DbOrTx, organizationId: string, ids: string[]) {
+  const teamIds = ids.filter((i) => i.startsWith("team:")).map((i) => i.slice(5));
+  const people = ids.filter((i) => !i.startsWith("team:"));
+  return [...new Set([...people, ...(await teamMemberIds(conn, organizationId, teamIds))])];
+}
+
 /** Plain-text version for notification previews: "@[Sara](id)" → "@Sara". */
 export function mentionsToText(body: string) {
   return body.replace(MENTION_RE, (_, name: string) => `@${name}`);
@@ -256,7 +264,7 @@ export async function notifyComment(conn: DbOrTx, organizationId: string, actorI
   const who = await nameOf(conn, actorId);
   const preview = mentionsToText(body).slice(0, 300);
   const items: NewNotification[] = [
-    ...extractMentions(body).map((userId) => ({ userId, kind: "mention" as const, taskId, title: `${who} mentioned you on ${ctx.ref}`, body: preview, link: ctx.link })),
+    ...(await expandMentions(conn, organizationId, extractMentions(body))).map((userId) => ({ userId, kind: "mention" as const, taskId, title: `${who} mentioned you on ${ctx.ref}`, body: preview, link: ctx.link })),
     ...[ctx.assigneeId, ...ctx.coAssignees, ...ctx.watchers]
       .filter((u): u is string => !!u)
       .map((userId) => ({ userId, kind: "comment" as const, taskId, title: `${who} commented on ${ctx.ref}`, body: preview, link: ctx.link })),

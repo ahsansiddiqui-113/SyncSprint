@@ -15,9 +15,12 @@ import {
 } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { POSITION_STEP } from "@/lib/fractional-index";
+import { TRIAL_DAYS, isBillableRole } from "@/lib/billing-rules";
+import { assertSeatAvailable } from "./billing";
 import { hasRole, requireOrgBySlug, requireOrgPermission } from "@/lib/rbac";
 
-export const roleSchema = z.enum(["owner", "admin", "member", "viewer"]);
+/** Roles that can be granted. ("owner" is a legacy alias of admin and can't be assigned.) */
+export const roleSchema = z.enum(["admin", "member", "viewer"]);
 export const DEFAULT_COLUMNS = ["Backlog", "In Progress", "Review", "Done"] as const;
 
 export function slugify(input: string) {
@@ -67,8 +70,9 @@ export async function createOrganization(
       if (!taken) break;
       slug = `${base}-${randomBytes(2).toString("hex")}`;
     }
-    const [org] = await tx.insert(organizations).values({ name, slug, isDemo: !!raw.isDemo }).returning();
-    await tx.insert(orgMembers).values({ organizationId: org!.id, userId, role: "owner" });
+    // New companies start a 14-day free trial (demo workspaces are never billed).
+    const [org] = await tx.insert(organizations).values({ name, slug, isDemo: !!raw.isDemo, trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000) }).returning();
+    await tx.insert(orgMembers).values({ organizationId: org!.id, userId, role: "admin" });
     await tx.insert(auditLogs).values({
       organizationId: org!.id,
       actorId: userId,
@@ -197,18 +201,20 @@ export async function listMembers(conn: DB, actorId: string, organizationId: str
   return listMembersForOrg(conn, organizationId);
 }
 
-async function ownerCount(conn: Pick<DB, "select">, organizationId: string) {
+async function adminCount(conn: Pick<DB, "select">, organizationId: string) {
   const [row] = await conn
     .select({ n: sql<number>`count(*)::int` })
     .from(orgMembers)
-    .where(and(eq(orgMembers.organizationId, organizationId), eq(orgMembers.role, "owner")));
+    .where(and(eq(orgMembers.organizationId, organizationId), inArray(orgMembers.role, ["admin", "owner"])));
   return row?.n ?? 0;
 }
 
+const isAdminish = (r: OrgRole) => r === "admin" || r === "owner";
+
 /**
  * Role changes:
- *  - admins+ may change roles; only owners may grant/revoke `owner` or touch another owner
- *  - the last owner can never be demoted (the org must stay administrable)
+ *  - admins may change any role
+ *  - the last admin can never be demoted or removed (the company must stay administrable)
  */
 export async function changeMemberRole(
   conn: DB,
@@ -216,7 +222,7 @@ export async function changeMemberRole(
   raw: { organizationId: string; userId: string; role: OrgRole }
 ) {
   const input = z.object({ organizationId: z.string().uuid(), userId: z.string().uuid(), role: roleSchema }).parse(raw);
-  const actorRole = await requireOrgPermission(actorId, input.organizationId, "admin", conn);
+  await requireOrgPermission(actorId, input.organizationId, "admin", conn, { billingExempt: true });
 
   return conn.transaction(async (tx) => {
     const [target] = await tx
@@ -225,13 +231,11 @@ export async function changeMemberRole(
       .where(and(eq(orgMembers.organizationId, input.organizationId), eq(orgMembers.userId, input.userId)))
       .limit(1);
     if (!target) throw new AppError("NOT_FOUND", "Member not found");
+    // Viewer → member/admin takes a paid seat.
+    if (!isBillableRole(target.role) && isBillableRole(input.role)) await assertSeatAvailable(tx, input.organizationId);
 
-    const touchesOwner = target.role === "owner" || input.role === "owner";
-    if (touchesOwner && actorRole !== "owner") {
-      throw new AppError("FORBIDDEN_REQUIRES_OWNER", "Only owners can grant or revoke ownership");
-    }
-    if (target.role === "owner" && input.role !== "owner" && (await ownerCount(tx, input.organizationId)) <= 1) {
-      throw new AppError("CONFLICT", "A workspace must keep at least one owner");
+    if (isAdminish(target.role) && input.role !== "admin" && (await adminCount(tx, input.organizationId)) <= 1) {
+      throw new AppError("CONFLICT", "A workspace must keep at least one admin");
     }
     if (target.role === input.role) return { from: target.role, to: input.role };
 
@@ -253,7 +257,7 @@ export async function changeMemberRole(
 
 export async function removeMember(conn: DB, actorId: string, organizationId: string, userId: string) {
   const isSelf = actorId === userId;
-  const actorRole = await requireOrgPermission(actorId, organizationId, isSelf ? "viewer" : "admin", conn);
+  await requireOrgPermission(actorId, organizationId, isSelf ? "viewer" : "admin", conn, { billingExempt: true });
   return conn.transaction(async (tx) => {
     const [target] = await tx
       .select({ role: orgMembers.role })
@@ -261,11 +265,8 @@ export async function removeMember(conn: DB, actorId: string, organizationId: st
       .where(and(eq(orgMembers.organizationId, organizationId), eq(orgMembers.userId, userId)))
       .limit(1);
     if (!target) throw new AppError("NOT_FOUND", "Member not found");
-    if (target.role === "owner" && !isSelf && actorRole !== "owner") {
-      throw new AppError("FORBIDDEN_REQUIRES_OWNER");
-    }
-    if (target.role === "owner" && (await ownerCount(tx, organizationId)) <= 1) {
-      throw new AppError("CONFLICT", "A workspace must keep at least one owner");
+    if (isAdminish(target.role) && (await adminCount(tx, organizationId)) <= 1) {
+      throw new AppError("CONFLICT", "A workspace must keep at least one admin. Make someone else an admin first.");
     }
     await tx.delete(orgMembers).where(and(eq(orgMembers.organizationId, organizationId), eq(orgMembers.userId, userId)));
     await tx.insert(auditLogs).values({
@@ -289,8 +290,8 @@ export async function createInvite(
   const input = z
     .object({ organizationId: z.string().uuid(), email: z.string().trim().toLowerCase().email(), role: roleSchema })
     .parse(raw);
-  const actorRole = await requireOrgPermission(actorId, input.organizationId, "admin", conn);
-  if (input.role === "owner" && actorRole !== "owner") throw new AppError("FORBIDDEN_REQUIRES_OWNER");
+  await requireOrgPermission(actorId, input.organizationId, "admin", conn);
+  if (isBillableRole(input.role)) await assertSeatAvailable(conn, input.organizationId);
 
   const token = randomBytes(32).toString("base64url");
   return conn.transaction(async (tx) => {
@@ -377,6 +378,9 @@ export async function acceptInvite(conn: DB, userId: string, token: string) {
       .from(orgMembers)
       .where(and(eq(orgMembers.organizationId, row.invite.organizationId), eq(orgMembers.userId, userId)))
       .limit(1);
+    if (isBillableRole(row.invite.role) && !(existing && isBillableRole(existing.role))) {
+      await assertSeatAvailable(tx, row.invite.organizationId);
+    }
     if (!existing) {
       await tx.insert(orgMembers).values({ organizationId: row.invite.organizationId, userId, role: row.invite.role });
     } else if (!hasRole(existing.role, row.invite.role)) {

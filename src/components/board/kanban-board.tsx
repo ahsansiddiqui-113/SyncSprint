@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDownUp, CalendarDays, ChartGantt, ChevronRight, Eye, Gauge, Kanban, LayoutDashboard, List as ListIcon, MoreHorizontal, Plus, Rocket, Settings2, Shuffle, Sparkles, Table2, Zap } from "lucide-react";
+import { ArrowDownUp, CalendarDays, ChartGantt, ChevronRight, Eye, Gauge, Kanban, LayoutDashboard, List as ListIcon, Link2, MoreHorizontal, Plus, Rocket, Settings2, Shuffle, Sparkles, Table2, Zap } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import type { OrgEvent, PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -39,6 +39,8 @@ import { CustomizePanel } from "./customize-panel";
 import { AutomationsPanel } from "./automations-panel";
 import { ImportExportPanel } from "./import-export-panel";
 import { Popover } from "@/components/ui/popover";
+import { ShareLinkDialog } from "@/components/workspace/share-links";
+import { isAdminRole } from "@/lib/rbac-shared";
 import { ViewsMenu, type GroupBy } from "./views-menu";
 import { showCapacityWarnings } from "./capacity-warnings";
 import { getWorkloadAction } from "@/actions/capacity.actions";
@@ -57,6 +59,8 @@ export type BoardCtx = {
   me: { id: string; name: string };
   role: OrgRole;
   aiEnabled: boolean;
+  /** Groups (QA, Devs...) for assigning work and @mentions. */
+  teams: { id: string; name: string; handle: string; color: string }[];
 };
 
 const VIEW_META: Record<ViewId, { label: string; icon: typeof Kanban }> = {
@@ -108,6 +112,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const [showCustomize, setShowCustomize] = useState(false);
   const [showAutomations, setShowAutomations] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   /** Bumped on anything that changes workload (task edits, co-assignees, capacity settings). */
   const [workloadKey, setWorkloadKey] = useState(0);
   const [weekLoad, setWeekLoad] = useState<WeekLoad>(new Map());
@@ -124,7 +129,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     () => applyFilters(state.tasks, filters, { meId: me.id, doneColumnId, refOf, tagsByTask: meta.tagsByTask }),
     [state.tasks, filters, me.id, doneColumnId, refOf, meta.tagsByTask]
   );
-  const decor = useMemo(() => buildDecor(state.tasks, meta, doneColumnId), [state.tasks, meta, doneColumnId]);
+  const decor = useMemo(() => buildDecor(state.tasks, meta, doneColumnId, props.teams), [state.tasks, meta, doneColumnId, props.teams]);
 
   /* Project meta (checklists, tags, dependencies): load once, then debounce refreshes. */
   const metaTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -436,6 +441,11 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
               <button onClick={() => setShowImport(true)} className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[15px] hover:bg-hover">
                 <ArrowDownUp className="h-4 w-4 text-subtle" /> Import & export CSV
               </button>
+              {isAdminRole(role) && (
+                <button onClick={() => setShowShare(true)} className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[15px] hover:bg-hover">
+                  <Link2 className="h-4 w-4 text-subtle" /> Share read-only link
+                </button>
+              )}
             </Popover>
             <Button variant="ai" size="sm" onClick={() => setShowDigest(true)}>
               <Sparkles className="h-4 w-4" /> AI standup
@@ -595,6 +605,9 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
         />
       )}
       {showDigest && <DigestPanel ctx={ctx} onClose={() => setShowDigest(false)} />}
+      {showShare && (
+        <ShareLinkDialog organizationId={org.id} projects={[{ id: project.id, key: project.key, name: project.name }]} defaultProjectId={project.id} onClose={() => setShowShare(false)} />
+      )}
       {showAutomations && <AutomationsPanel ctx={ctx} tags={meta.tags} onClose={() => setShowAutomations(false)} />}
       {showImport && (
         <ImportExportPanel

@@ -40,7 +40,7 @@ export function MembersTable({
     <div className="divide-y divide-border">
       {members.map((m) => {
         // UI mirrors the server rules for clarity; the server re-validates everything.
-        const editable = isAdmin && (actorRole === "owner" || m.role !== "owner");
+        const editable = isAdmin;
         return (
           <div key={m.userId} className="flex items-center gap-3.5 px-5 py-3.5 transition-colors hover:bg-surface-2">
             <Avatar id={m.userId} name={m.name} src={m.avatarUrl} size={34} />
@@ -60,8 +60,7 @@ export function MembersTable({
                   run(() => changeMemberRoleAction(organizationId, m.userId, e.target.value as OrgRole), `${m.name} is now ${e.target.value}`)
                 }
               >
-                {(["owner", "admin", "member", "viewer"] as const)
-                  .filter((r) => r !== "owner" || actorRole === "owner")
+                {(["admin", "member", "viewer"] as const)
                   .map((r) => (
                     <option key={r} value={r}>{r}</option>
                   ))}

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, SlidersHorizontal, Tag as TagIcon, Timer, Users, Flag, GitMerge, Loader2, MessageSquare, Plus, Repeat, Sparkles, Trash2, UserRound, Wand2, Zap } from "lucide-react";
+import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, SlidersHorizontal, Tag as TagIcon, Timer, Users, Flag, GitMerge, Loader2, MessageSquare, Plus, Repeat, Sparkles, Trash2, UserRound, UsersRound, Wand2, Zap } from "lucide-react";
 import type { TaskPriority } from "@/db/schema";
 import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -41,6 +41,7 @@ function draftFrom(t: TaskDTO) {
     storyPoints: t.storyPoints === null ? "" : String(t.storyPoints),
     type: t.type,
     sprintId: t.sprintId ?? "",
+    teamId: t.teamId ?? "",
     estimateHours: t.estimateHours === null ? "" : String(t.estimateHours),
   };
 }
@@ -91,6 +92,7 @@ export function TaskDrawer(props: {
     draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints)) ||
     draft.type !== base.type ||
     draft.sprintId !== (base.sprintId ?? "") ||
+    draft.teamId !== (base.teamId ?? "") ||
     draft.estimateHours !== (base.estimateHours === null ? "" : String(base.estimateHours));
   const datesInvalid = !!draft.startDate && !!draft.dueDate && draft.startDate > draft.dueDate;
   const remoteChanged = task.version > base.version;
@@ -121,6 +123,7 @@ export function TaskDrawer(props: {
       if (draft.storyPoints !== (base.storyPoints === null ? "" : String(base.storyPoints))) patch.storyPoints = draft.storyPoints === "" ? null : Number(draft.storyPoints);
       if (draft.type !== base.type) patch.type = draft.type;
       if (draft.sprintId !== (base.sprintId ?? "")) patch.sprintId = draft.sprintId || null;
+      if (draft.teamId !== (base.teamId ?? "")) patch.teamId = draft.teamId || null;
       if (draft.estimateHours !== (base.estimateHours === null ? "" : String(base.estimateHours))) {
         patch.estimateHours = draft.estimateHours === "" ? null : Math.round(Number(draft.estimateHours) * 4) / 4;
       }
@@ -274,6 +277,17 @@ export function TaskDrawer(props: {
                   {s.name}{s.status === "active" ? " (active)" : s.status === "completed" ? " (completed)" : ""}
                 </option>
               ))}
+          </Select>
+
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><UsersRound className="h-3.5 w-3.5" /> Group</span>
+          <Select
+            aria-label="Group"
+            className="h-8 max-w-60 border-transparent bg-transparent px-1.5 hover:border-border-strong"
+            value={draft.teamId}
+            onChange={(e) => setDraft({ ...draft, teamId: e.target.value })}
+          >
+            <option value="">No group</option>
+            {ctx.teams.map((t) => <option key={t.id} value={t.id}>{t.name} (@{t.handle})</option>)}
           </Select>
 
           <span className="flex items-center gap-2 text-[15px] text-subtle"><Columns3 className="h-3.5 w-3.5" /> Status</span>

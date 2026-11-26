@@ -43,6 +43,11 @@ const PHASES: { name: string; status: Status; items: string[] }[] = [
     items: ["Automations (when this happens, do that)", "Recurring tasks", "Sprint capacity planning", "Import from CSV and Jira", "REST API and webhooks"],
   },
   {
+    name: "Business & sharing",
+    status: "shipped",
+    items: ["Plans with a free trial", "Admin, member and free viewer roles", "Groups like QA, Developers, Marketing", "Read-only share links", "Workload tracking per group"],
+  },
+  {
     name: "Visual planning",
     status: "next",
     items: ["Whiteboards and mind maps", "Gantt baselines and critical path", "Portfolio view across projects", "Scheduled automations"],
