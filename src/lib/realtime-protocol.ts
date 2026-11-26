@@ -59,7 +59,14 @@ export type OrgEvent =
   | { type: "PROJECT_CONFIG_CHANGED"; actor: Actor; projectId: string }
   /** Schedules, personal capacity or time off changed: clients refresh workload. */
   | { type: "CAPACITY_CHANGED"; actor: Actor }
-  | { type: "MEMBERSHIP_CHANGED"; actor: Actor; userId: string; role: OrgRole | null };
+  | { type: "MEMBERSHIP_CHANGED"; actor: Actor; userId: string; role: OrgRole | null }
+  /** New notifications for these people: their inbox refetches (contents never travel over the wire). */
+  | { type: "NOTIFICATIONS_CHANGED"; userIds: string[] }
+  /** Time logged / timer started or stopped on a task. */
+  | { type: "TIME_CHANGED"; actor: Actor; projectId: string; taskId: string; userId: string }
+  | { type: "ATTACHMENTS_CHANGED"; actor: Actor; projectId: string; taskId: string }
+  | { type: "DOCS_CHANGED"; actor: Actor; docId: string; version: number | null }
+  | { type: "GOALS_CHANGED"; actor: Actor };
 
 export type ServerMessage =
   | { type: "WELCOME"; connectionId: string; userId: string }

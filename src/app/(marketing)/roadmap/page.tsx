@@ -34,12 +34,12 @@ const PHASES: { name: string; status: Status; items: string[] }[] = [
   },
   {
     name: "Collaboration",
-    status: "next",
+    status: "shipped",
     items: ["@mentions and notifications inbox", "Time tracking", "File attachments", "Docs linked to tasks", "Goals and OKRs"],
   },
   {
     name: "Automation",
-    status: "planned",
+    status: "next",
     items: ["Automations (when this happens, do that)", "Recurring tasks", "Capacity per sprint", "Whiteboards", "Import from CSV and Jira"],
   },
 ];

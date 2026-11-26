@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Activity, ChevronsUpDown, Home, LogOut, Plus, ShieldCheck, Users } from "lucide-react";
+import { Activity, ChevronsUpDown, FileText, Goal, Home, Inbox, LogOut, Plus, ShieldCheck, Users } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ import { switchDemoRoleAction } from "@/actions/demo.actions";
 import { Avatar } from "@/components/ui/avatar";
 import { RoleBadge } from "@/components/ui/badge";
 import { Logo } from "@/components/ui/card";
+import { TimerPill, useUnreadCount } from "./live-widgets";
 
 const ROLES: OrgRole[] = ["owner", "admin", "member", "viewer"];
 const SPACE_COLORS = ["#7b68ee", "#ff9800", "#2db87d", "#e44a8a", "#49ccf9", "#f5a623"];
@@ -33,9 +34,13 @@ export function Sidebar({
   const router = useRouter();
   const [pending, start] = useTransition();
   const base = `/w/${org.slug}`;
+  const unread = useUnreadCount(org.id, user.id);
 
   const nav = [
     { href: base, label: "Home", icon: Home, active: path === base },
+    { href: `${base}/inbox`, label: "Inbox", icon: Inbox, active: path.endsWith("/inbox"), badge: unread },
+    { href: `${base}/docs`, label: "Docs", icon: FileText, active: path.includes("/docs") },
+    { href: `${base}/goals`, label: "Goals", icon: Goal, active: path.endsWith("/goals") },
     { href: `${base}/activity`, label: "Activity", icon: Activity, active: path.endsWith("/activity") },
     { href: `${base}/settings/members`, label: "Members", icon: Users, active: path.includes("/settings/") },
   ];
@@ -67,6 +72,8 @@ export function Sidebar({
         </label>
       </div>
 
+      <TimerPill org={org} />
+
       <nav className="space-y-0.5 px-3 pt-3">
         {nav.map((i) => (
           <Link
@@ -78,7 +85,12 @@ export function Sidebar({
             )}
           >
             <i.icon className="h-[18px] w-[18px]" />
-            {i.label}
+            <span className="flex-1">{i.label}</span>
+            {"badge" in i && !!i.badge && (
+              <span className="min-w-6 rounded-full bg-primary px-1.5 py-0.5 text-center text-[12px] font-semibold leading-none text-white" aria-label={`${i.badge} unread`}>
+                {i.badge > 99 ? "99+" : i.badge}
+              </span>
+            )}
           </Link>
         ))}
       </nav>

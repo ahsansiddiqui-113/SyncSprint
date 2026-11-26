@@ -14,6 +14,7 @@ import {
   uniqueIndex,
   primaryKey,
   check,
+  customType,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -24,6 +25,14 @@ export const inviteStatusEnum = pgEnum("invite_status", ["pending", "accepted", 
 export const sprintStatusEnum = pgEnum("sprint_status", ["planned", "active", "completed"]);
 export const customFieldTypeEnum = pgEnum("custom_field_type", ["text", "number", "select", "date", "person"]);
 export const timeOffKindEnum = pgEnum("time_off_kind", ["vacation", "sick", "holiday", "other"]);
+export const notificationKindEnum = pgEnum("notification_kind", ["mention", "assigned", "comment", "completed", "capacity"]);
+export const keyResultKindEnum = pgEnum("key_result_kind", ["number", "tasks"]);
+
+/** Postgres bytea for small attachments (kept in the database so serverless hosts need no extra storage). */
+const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
+  dataType: () => "bytea",
+  fromDriver: (v) => (Buffer.isBuffer(v) ? v : Buffer.from(v)),
+});
 /** Work item types (Azure Boards / Jira style). Hierarchy uses parentId (one level). */
 export const workItemTypeEnum = pgEnum("work_item_type", ["epic", "story", "task", "bug"]);
 
@@ -523,6 +532,175 @@ export const savedViews = pgTable(
   (t) => [index("saved_views_project_idx").on(t.organizationId, t.projectId)]
 );
 
+// 7i. Notifications (in-app inbox)
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    kind: notificationKindEnum("kind").notNull(),
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 200 }).notNull(),
+    body: varchar("body", { length: 300 }),
+    /** Where clicking the notification goes (app-relative path). */
+    link: varchar("link", { length: 300 }),
+    /** Optional dedupe key, e.g. one capacity alert per person per day. */
+    dedupeKey: varchar("dedupe_key", { length: 120 }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    index("notifications_inbox_idx").on(t.organizationId, t.userId, t.createdAt),
+    uniqueIndex("notifications_dedupe_idx").on(t.userId, t.dedupeKey),
+  ]
+);
+
+// 7j. Time tracking: one running timer per person (endedAt null)
+export const timeEntries = pgTable(
+  "time_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** Duration in minutes (set when stopped or for manual entries). */
+    minutes: integer("minutes"),
+    note: varchar("note", { length: 200 }),
+    manual: boolean("manual").default(false).notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    index("time_entries_task_idx").on(t.organizationId, t.taskId),
+    index("time_entries_user_idx").on(t.organizationId, t.userId, t.startedAt),
+    uniqueIndex("time_entries_one_running_idx").on(t.userId).where(sql`${t.endedAt} is null`),
+    check("time_entries_minutes_range", sql`${t.minutes} is null or (${t.minutes} >= 0 and ${t.minutes} <= 1440)`),
+  ]
+);
+
+// 7k. Attachments (stored in Postgres; small files only)
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    uploadedById: uuid("uploaded_by_id").references(() => users.id, { onDelete: "set null" }),
+    filename: varchar("filename", { length: 200 }).notNull(),
+    contentType: varchar("content_type", { length: 120 }).notNull(),
+    size: integer("size").notNull(),
+    data: bytea("data").notNull(),
+    ...timestamps,
+  },
+  (t) => [index("attachments_task_idx").on(t.organizationId, t.taskId)]
+);
+
+// 7l. Docs (wiki pages, markdown) linked to tasks
+export const docs = pgTable(
+  "docs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 160 }).notNull(),
+    content: text("content").default("").notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    version: integer("version").default(1).notNull(),
+    ...timestamps,
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("docs_org_updated_idx").on(t.organizationId, t.updatedAt)]
+);
+
+export const docTasks = pgTable(
+  "doc_tasks",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    docId: uuid("doc_id")
+      .notNull()
+      .references(() => docs.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.docId, t.taskId] }), index("doc_tasks_task_idx").on(t.organizationId, t.taskId)]
+);
+
+// 7m. Goals (OKRs): key results are numeric targets or progress of linked tasks
+export const goals = pgTable(
+  "goals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 160 }).notNull(),
+    description: text("description"),
+    ownerId: uuid("owner_id").references(() => users.id, { onDelete: "set null" }),
+    dueDate: date("due_date", { mode: "string" }),
+    ...timestamps,
+  },
+  (t) => [index("goals_org_idx").on(t.organizationId)]
+);
+
+export const keyResults = pgTable(
+  "key_results",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    goalId: uuid("goal_id")
+      .notNull()
+      .references(() => goals.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 160 }).notNull(),
+    kind: keyResultKindEnum("kind").notNull(),
+    startValue: doublePrecision("start_value").default(0).notNull(),
+    targetValue: doublePrecision("target_value").default(100).notNull(),
+    currentValue: doublePrecision("current_value").default(0).notNull(),
+    unit: varchar("unit", { length: 20 }),
+    position: doublePrecision("position").notNull(),
+  },
+  (t) => [index("key_results_goal_idx").on(t.organizationId, t.goalId)]
+);
+
+export const keyResultTasks = pgTable(
+  "key_result_tasks",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    keyResultId: uuid("key_result_id")
+      .notNull()
+      .references(() => keyResults.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.keyResultId, t.taskId] }), index("kr_tasks_task_idx").on(t.organizationId, t.taskId)]
+);
+
 // 8. Task comments
 export const taskComments = pgTable(
   "task_comments",
@@ -594,3 +772,9 @@ export type CustomFieldType = (typeof customFieldTypeEnum.enumValues)[number];
 export type SavedView = typeof savedViews.$inferSelect;
 export type TimeOff = typeof timeOff.$inferSelect;
 export type TimeOffKind = (typeof timeOffKindEnum.enumValues)[number];
+export type Notification = typeof notifications.$inferSelect;
+export type NotificationKind = (typeof notificationKindEnum.enumValues)[number];
+export type TimeEntry = typeof timeEntries.$inferSelect;
+export type Doc = typeof docs.$inferSelect;
+export type Goal = typeof goals.$inferSelect;
+export type KeyResult = typeof keyResults.$inferSelect;

@@ -56,17 +56,19 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
   - **warnings never block**: assignee pickers show this week's load, forms show a heads-up before saving, and saves return a warning naming the day and the overage
   - **Workload view**: people × days grid with load vs capacity, task breakdown per cell, unestimated / undated counts
 
-## Phase 5 — Collaboration & productivity
-- ⬜ @mentions + in-app notifications inbox
-- ⬜ Time tracking (start/stop timer, estimates vs actuals)
-- ⬜ File attachments
-- ⬜ Docs / wiki pages linked to tasks
-- ⬜ Goals / OKRs with progress from linked tasks
+## Phase 5 — Collaboration & productivity ✅
+- ✅ **Inbox**: notifications for @mentions, assignments (incl. co-assignees), comments on tasks you own or watch, and tasks reaching Done. Never notifies the person who acted; one notification per person per event (a mention beats a plain comment); only current members of the workspace receive anything. Unread badge in the sidebar, live toast, mark one/all read, filters
+- ✅ **Workload alerts**: when an assignment pushes someone over capacity, owners and admins are notified, at most once per person per day (database-enforced dedupe). The assignment itself is still never blocked
+- ✅ **@mentions**: type @ in a comment to pick a teammate; mentions are highlighted (yours stand out)
+- ✅ **Time tracking**: start/stop timer (one running timer per person, enforced by a partial unique index; starting another stops the first), manual entries ("1h 30m", "45m", "1:15"), tracked vs estimate bar, running timer pill in the sidebar. Only the author or an admin deletes an entry
+- ✅ **Attachments**: up to 4 MB per file, 200 MB per workspace, stored in Postgres so they work on serverless hosts. Membership checked on every download; only raster images render inline, everything else is forced to download with `nosniff` and a sandbox CSP
+- ✅ **Docs**: markdown wiki pages (tables, checklists, code) rendered without raw HTML; live preview, autosave, and conflict-safe saving (a second writer gets a choice instead of overwriting); link pages to tasks, shown in the task drawer
+- ✅ **Goals / OKRs**: key results measured by a number (supports decreasing targets, e.g. latency) or by linked tasks finished; goal progress is the average of its key results. Admins set goals, members check in values and link work
+- ✅ `?task=` links open a task's drawer directly (used by notifications, docs and goals)
 
 ## Phase 6 — Automation & scale
 - ⬜ Automations ("when status changes to Done → notify / assign / move")
 - ⬜ Recurring tasks
-- ⬜ Workload view (capacity per person per week)
 - ⬜ Mind map / whiteboard view
 - ⬜ Public API + webhooks, import from CSV/Jira
 - ⬜ Horizontal scaling of real-time (Redis / Postgres LISTEN-NOTIFY)

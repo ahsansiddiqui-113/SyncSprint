@@ -36,6 +36,13 @@
       "when": 1795634524789,
       "tag": "0004_customization_capacity",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795673152480,
+      "tag": "0005_collaboration",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { emitSignal } from "@/components/workspace/signals";
 import type { ClientMessage, OrgEvent, PresenceUser, ServerMessage } from "@/lib/realtime-protocol";
 
 export type ConnectionStatus = "connecting" | "live" | "offline" | "sync";
@@ -66,7 +67,10 @@ export function useRealtime(opts: {
         const msg = JSON.parse(String(ev.data)) as ServerMessage;
         if (msg.type === "WELCOME") setConnectionId(msg.connectionId);
         else if (msg.type === "PRESENCE") setPresence(msg.users);
-        else if (msg.type === "EVENT") handlers.current.onEvent(msg.event);
+        else if (msg.type === "EVENT") {
+          handlers.current.onEvent(msg.event);
+          emitSignal(msg.event); // sidebar inbox, timer pill, drawer sections
+        }
       };
       ws.onclose = (ev) => {
         setStatus("offline");

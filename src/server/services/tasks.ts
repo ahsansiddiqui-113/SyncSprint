@@ -15,6 +15,7 @@ import { AppError } from "@/lib/errors";
 import { MIN_GAP, POSITION_STEP, rebalancePositions } from "@/lib/fractional-index";
 import { requireOrgPermission } from "@/lib/rbac";
 import { assertAssignableSprint, recordSprintSnapshots } from "./sprints";
+import { notifyAssigned, notifyComment, notifyCompleted } from "./notifications";
 
 export const workItemTypeSchema = z.enum(["epic", "story", "task", "bug"]);
 
@@ -183,6 +184,7 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
       metadata: { ref: `${project.key}-${task!.taskNumber}`, title: task!.title, columnId: input.columnId, parentId: input.parentId ?? null },
     });
     await recordSprintSnapshots(tx, input.organizationId, [task!.sprintId]);
+    await notifyAssigned(tx, input.organizationId, actorId, task!.id, [task!.assigneeId]);
     return task!;
   });
 }
@@ -199,7 +201,7 @@ export const moveTaskInput = z.object({
 
 export type ConflictResult = { ok: false; code: "VERSION_CONFLICT"; current: Task | null };
 export type MoveResult =
-  | { ok: true; task: Task; rebalanced: Record<string, number> | null }
+  | { ok: true; task: Task; rebalanced: Record<string, number> | null; notified: string[] }
   | ConflictResult;
 
 /**
@@ -268,7 +270,19 @@ export async function moveTask(conn: DB, actorId: string, raw: z.input<typeof mo
     });
 
     await recordSprintSnapshots(tx, input.organizationId, [updated.sprintId]);
-    return { ok: true as const, task: finalTask, rebalanced };
+
+    // Entering the project's last (Done) column notifies assignees + watchers.
+    let notified: string[] = [];
+    if (before.columnId !== input.targetColumnId) {
+      const [last] = await tx
+        .select({ id: boardColumns.id })
+        .from(boardColumns)
+        .where(eq(boardColumns.projectId, targetCol.projectId))
+        .orderBy(desc(boardColumns.position))
+        .limit(1);
+      if (last?.id === input.targetColumnId) notified = await notifyCompleted(tx, input.organizationId, actorId, updated.id);
+    }
+    return { ok: true as const, task: finalTask, rebalanced, notified };
   });
 }
 
@@ -294,7 +308,7 @@ export const updateTaskInput = z.object({
     .partial(),
 });
 
-export type UpdateResult = { ok: true; task: Task; changes: string[] } | ConflictResult;
+export type UpdateResult = { ok: true; task: Task; changes: string[]; notified: string[] } | ConflictResult;
 
 export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof updateTaskInput>): Promise<UpdateResult> {
   const input = updateTaskInput.parse(raw);
@@ -346,7 +360,8 @@ export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof 
     });
     // Points or sprint membership changes move burndown lines (old and new sprint).
     await recordSprintSnapshots(tx, input.organizationId, [before.sprintId, updated.sprintId]);
-    return { ok: true as const, task: updated, changes: Object.keys(changes) };
+    const notified = changes.assigneeId ? await notifyAssigned(tx, input.organizationId, actorId, updated.id, [updated.assigneeId]) : [];
+    return { ok: true as const, task: updated, changes: Object.keys(changes), notified };
   });
 }
 
@@ -397,7 +412,8 @@ export async function addComment(conn: DB, actorId: string, organizationId: stri
       entityId: taskId,
       metadata: { commentId: comment!.id, preview: text.slice(0, 120) },
     });
-    return comment!;
+    const notified = await notifyComment(tx, organizationId, actorId, taskId, text);
+    return { ...comment!, notified };
   });
 }
 

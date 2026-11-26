@@ -82,6 +82,15 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   });
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  // Deep links from notifications / docs / goals: ?task=<id> opens the drawer once.
+  const linkedTaskId = searchParams.get("task");
+  useEffect(() => {
+    if (!linkedTaskId) return;
+    setOpenTaskId(linkedTaskId);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("task");
+    window.history.replaceState(null, "", url);
+  }, [linkedTaskId]);
   const [editing, setEditing] = useState(false);
   const [flash, setFlash] = useState<Record<string, true>>({});
   const [commentsVersion, setCommentsVersion] = useState(0);

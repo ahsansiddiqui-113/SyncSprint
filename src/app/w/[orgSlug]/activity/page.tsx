@@ -9,6 +9,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { ActivityFilters } from "@/components/workspace/activity-filters";
 import { timeAgo } from "@/lib/utils";
 
+const fmtMin = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : `${m}m`);
+
 function describe(action: string, meta: Record<string, unknown>, ref: string | undefined) {
   const target = ref ?? (typeof meta.title === "string" ? meta.title : "a task");
   switch (action) {
@@ -38,6 +40,17 @@ function describe(action: string, meta: Record<string, unknown>, ref: string | u
     case "SPRINT_STARTED": return `started ${meta.name} with ${meta.committedPoints} points committed`;
     case "SPRINT_COMPLETED": return `completed ${meta.name} · ${meta.completedPoints} of ${meta.committedPoints} points done${meta.carriedOver ? `, ${meta.carriedOver} carried over` : ""}`;
     case "SPRINT_DELETED": return `deleted ${meta.name}`;
+    case "TIMER_STARTED": return `started a timer on ${target}`;
+    case "TIME_LOGGED": return `logged ${fmtMin(Number(meta.minutes))} on ${target}${meta.via === "manual" ? "" : " (timer)"}`;
+    case "ATTACHMENT_ADDED": return `attached “${meta.filename}” to ${target}`;
+    case "ATTACHMENT_DELETED": return `removed the attachment “${meta.filename}” from ${target}`;
+    case "ASSIGNEES_UPDATED": return `updated who's assigned to ${target}`;
+    case "DOC_CREATED": return `created the doc “${meta.title}”`;
+    case "DOC_UPDATED": return `edited a doc (version ${meta.version})`;
+    case "DOC_DELETED": return `deleted the doc “${meta.title}”`;
+    case "GOAL_CREATED": return `created the goal “${meta.title}”`;
+    case "GOAL_DELETED": return `deleted the goal “${meta.title}”`;
+    case "KEY_RESULT_UPDATED": return `checked in a key result at ${meta.currentValue}`;
     default: return action.toLowerCase().replaceAll("_", " ");
   }
 }

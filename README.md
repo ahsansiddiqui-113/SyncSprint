@@ -123,7 +123,7 @@ Drag → the reducer moves the card immediately → the server action runs. On `
 
 ---
 
-## Tests (`src/tests`, 114 tests)
+## Tests (`src/tests`, 138 tests)
 
 Each file gets a fresh in-memory PGlite Postgres, migrated from the real SQL migrations.
 
@@ -136,6 +136,7 @@ Each file gets a fresh in-memory PGlite Postgres, migrated from the real SQL mig
 - **Sprints:** admin-only lifecycle, default naming and dates, start-early moves dates to today, one active sprint per project (service check + partial unique index), snapshots updated by moves, point edits, sprint changes and deletes, report series with ideal line, completion with carry-over, velocity, frozen completed sprints, tenant/project isolation, work item type validation, demo seed.
 - **Work breakdown:** subtasks are one level deep, same project and tenant, and cascade on delete; checklist roll-up and permissions; tags are per-tenant and case-insensitive; dependency cycles, duplicates, cross-tenant links and self-links (also blocked by a database CHECK) are rejected; the demo seed produces consistent data.
 - **Planning:** start/due/points validation (incl. impossible dates and partial edits checked against the stored row), reschedule under OCC, viewer can't reschedule, dashboard series counts + tenant isolation, UTC date maths, filters.
+- **Collaboration:** notifications skip the actor, dedupe per person (mention beats comment), never reach other tenants, fire on assignment / reassignment / new co-assignees / Done; inbox is personal and mark-read only touches your own; manager capacity alerts once per person per day; one running timer (service + unique index), manual entries, totals, delete rules; attachment name/type sanitising, size limits, membership-checked reads, uploader/admin delete; docs search, task links, OCC conflict on concurrent saves; goal progress for numeric (incl. decreasing) and task-based key results; mention encoding and duration parsing; demo seed.
 - **Units:** midpoint maths, prompt-injection fencing, AI fallback, keyword triage, and the client reducer ignoring stale packets.
 
 ---

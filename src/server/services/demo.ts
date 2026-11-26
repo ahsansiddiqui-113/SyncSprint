@@ -3,6 +3,13 @@ import { and, asc, eq, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   auditLogs,
+  docTasks,
+  docs,
+  goals,
+  keyResultTasks,
+  keyResults,
+  notifications,
+  timeEntries,
   sprints,
   sprintSnapshots,
   memberCapacity,
@@ -289,6 +296,88 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
       ]);
     }
 
+    /** Phase 5 sample data: inbox, logged time, a linked doc and a goal. */
+    async function seedCollaboration(eng: (typeof tasks.$inferSelect)[], projectId: string, billing: typeof tasks.$inferSelect) {
+      const [sara, alex, priya] = [mates[0]!, mates[1]!, mates[2]!];
+      const byNumber = (n: number) => eng.find((t) => t.taskNumber === n)!;
+      const link = (t: { id: string }) => `/w/${org!.slug}/projects/ENG?task=${t.id}`;
+      const ref = (t: { taskNumber: number }) => `ENG-${t.taskNumber}`;
+      const t5 = byNumber(5);
+      const t8 = byNumber(8);
+
+      await tx.insert(notifications).values([
+        { organizationId: orgId, userId: ownerUserId, actorId: alex.id, kind: "mention", taskId: billing.id, title: `${alex.name} mentioned you on ${ref(billing)}`, body: "@You can you review the retry policy before we ship? Dead-letter queue is wired up.", link: link(billing), createdAt: minutesAgo(18) },
+        { organizationId: orgId, userId: ownerUserId, actorId: sara.id, kind: "assigned", taskId: t8.id, title: `${sara.name} assigned you ${ref(t8)}`, body: t8.title, link: link(t8), createdAt: minutesAgo(95) },
+        { organizationId: orgId, userId: ownerUserId, actorId: priya.id, kind: "comment", taskId: t5.id, title: `${priya.name} commented on ${ref(t5)}`, body: "Pushed the fix to staging — p95 is back under 200ms.", link: link(t5), createdAt: minutesAgo(60 * 5) },
+        { organizationId: orgId, userId: ownerUserId, actorId: null, kind: "capacity", taskId: null, title: `${alex.name} is over capacity`, body: "11.5h of 8h today. Consider rebalancing their work.", link: `/w/${org!.slug}/projects/ENG?view=workload`, dedupeKey: `capacity:${alex.id}:${day(0)}`, createdAt: minutesAgo(60 * 7) },
+        { organizationId: orgId, userId: ownerUserId, actorId: priya.id, kind: "completed", taskId: billing.id, title: `${priya.name} completed Design webhook event schema`, body: "Subtask of " + billing.title, link: link(billing), createdAt: minutesAgo(60 * 26), readAt: minutesAgo(60 * 20) },
+      ]);
+
+      const entry = (t: { id: string }, userId: string, daysAgo: number, minutes: number, note: string | null) => {
+        const startedAt = new Date(`${day(-daysAgo)}T09:00:00Z`);
+        return { organizationId: orgId, taskId: t.id, userId, startedAt, endedAt: new Date(startedAt.getTime() + minutes * 60_000), minutes, note, manual: true };
+      };
+      await tx.insert(timeEntries).values([
+        entry(billing, alex.id, 3, 40, "Signature verification + tests"),
+        entry(billing, alex.id, 2, 25, "Idempotency keys"),
+        entry(billing, priya.id, 1, 20, "Pairing on retries"),
+        entry(t5, priya.id, 1, 240, null),
+        entry(t5, priya.id, 0, 120, "Profiling the hot path"),
+        entry(t8, sara.id, 2, 60, "Review"),
+      ]);
+
+      const [runbook, plan] = await tx
+        .insert(docs)
+        .values([
+          {
+            organizationId: orgId, title: "Billing webhooks runbook", createdById: alex.id, updatedById: alex.id, version: 3, updatedAt: minutesAgo(60 * 3),
+            content: [
+              "# Billing webhooks runbook", "",
+              "How we receive, verify and process payment events.", "",
+              "## Checklist before shipping", "",
+              "- [x] Verify webhook signatures", "- [ ] Idempotent handler (dedupe on event id)", "- [ ] Retries with a dead-letter queue", "",
+              "## When events fail", "",
+              "| Symptom | First check | Owner |", "| --- | --- | --- |",
+              "| 4xx from handler | Signature secret rotated? | Platform |", "| Duplicate invoices | Idempotency key missing | Platform |", "",
+              "> Never replay events by hand in production — use the dead-letter queue.",
+            ].join("\n"),
+          },
+          {
+            organizationId: orgId, title: "Q4 engineering plan", createdById: sara.id, updatedById: sara.id, version: 5, updatedAt: minutesAgo(60 * 30),
+            content: "# Q4 engineering plan\n\n## Themes\n\n1. **Self-serve billing** so teams can upgrade without talking to sales\n2. **Reliability**: p95 under 200ms on every board action\n3. **Security review** ahead of the SOC 2 audit\n\n## Not this quarter\n\n- Mobile apps\n- Public API v2\n",
+          },
+        ])
+        .returning();
+      await tx.insert(docTasks).values([
+        { organizationId: orgId, docId: runbook!.id, taskId: billing.id },
+        { organizationId: orgId, docId: plan!.id, taskId: t5.id },
+      ]);
+
+      const [goal] = await tx
+        .insert(goals)
+        .values({ organizationId: orgId, title: "Launch self-serve billing", description: "Teams can upgrade and pay without contacting sales.", ownerId: sara.id, dueDate: day(40) })
+        .returning();
+      const [paying, shipped] = await tx
+        .insert(keyResults)
+        .values([
+          { organizationId: orgId, goalId: goal!.id, title: "Paying workspaces", kind: "number", startValue: 0, targetValue: 50, currentValue: 18, unit: "workspaces", position: POSITION_STEP },
+          { organizationId: orgId, goalId: goal!.id, title: "Ship the billing integration", kind: "tasks", position: 2 * POSITION_STEP },
+        ])
+        .returning();
+      const subtasks = await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentId, billing.id));
+      await tx.insert(keyResultTasks).values([billing, ...subtasks].map((t) => ({ organizationId: orgId, keyResultId: shipped!.id, taskId: t.id })));
+      void paying;
+
+      const [reliability] = await tx
+        .insert(goals)
+        .values({ organizationId: orgId, title: "Make every board action feel instant", ownerId: alex.id, dueDate: day(70) })
+        .returning();
+      await tx.insert(keyResults).values([
+        { organizationId: orgId, goalId: reliability!.id, title: "p95 latency of board moves", kind: "number", startValue: 480, targetValue: 200, currentValue: 260, unit: "ms", position: POSITION_STEP },
+      ]);
+      void projectId;
+    }
+
     /** Phase 2 sample data: tags, a checklist, subtasks and dependencies on the ENG board. */
     async function seedBreakdown(eng: (typeof tasks.$inferSelect)[], projectId: string, cols: (typeof boardColumns.$inferSelect)[]) {
       const byNumber = (n: number) => eng.find((t) => t.taskNumber === n)!;
@@ -347,6 +436,7 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
         { organizationId: orgId, blockerId: byNumber(5).id, blockedId: billing.id },
         { organizationId: orgId, blockerId: byNumber(8).id, blockedId: byNumber(6).id },
       ]);
+      await seedCollaboration(eng, projectId, billing);
     }
 
     await tx.insert(auditLogs).values({

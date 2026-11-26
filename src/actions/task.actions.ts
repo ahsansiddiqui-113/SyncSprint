@@ -11,6 +11,7 @@ import { broadcastOrgEvent } from "@/server/realtime-hub";
 import * as svc from "@/server/services/tasks";
 import { capacityWarnings, type CapacityWarning } from "@/server/services/capacity";
 import { taskAssignees } from "@/db/schema";
+import { alertManagers, pingInboxes } from "@/server/inbox-broadcast";
 
 /**
  * Advisory only: the change is already saved. Computed for everyone assigned to
@@ -39,6 +40,8 @@ export async function createTaskAction(input: Parameters<typeof svc.createTask>[
     const dto = toTaskDTO(task);
     broadcastOrgEvent(task.organizationId, { type: "TASK_CREATED", actor, task: dto });
     const warnings = task.assigneeId && task.estimateHours ? await warningsForTask(task.organizationId, task, today) : [];
+    pingInboxes(task.organizationId, task.assigneeId && task.assigneeId !== actor.id ? [task.assigneeId] : []);
+    await alertManagers(task.organizationId, actor.id, task.id, warnings);
     return { task: dto, warnings };
   });
 }
@@ -62,6 +65,7 @@ export async function moveTaskAction(input: {
       broadcastOrgEvent(input.organizationId, { type: "COLUMN_REBALANCED", columnId: task.columnId, positions: res.rebalanced });
     }
     broadcastOrgEvent(input.organizationId, { type: "TASK_UPDATED", actor, task, action: "moved" });
+    pingInboxes(input.organizationId, res.notified);
     return { conflict: false as const, task, rebalanced: res.rebalanced };
   });
 }
@@ -74,6 +78,8 @@ export async function updateTaskAction(input: Parameters<typeof svc.updateTask>[
     const task = toTaskDTO(res.task);
     broadcastOrgEvent(input.organizationId, { type: "TASK_UPDATED", actor, task, action: "edited", changes: res.changes });
     const warnings = res.changes.some((c) => CAPACITY_FIELDS.includes(c)) ? await warningsForTask(input.organizationId, res.task, today) : [];
+    pingInboxes(input.organizationId, res.notified);
+    await alertManagers(input.organizationId, actor.id, res.task.id, warnings);
     return { conflict: false as const, task, warnings };
   });
 }
@@ -92,6 +98,7 @@ export async function addCommentAction(organizationId: string, taskId: string, b
     const actor = await requireActor();
     const c = await svc.addComment(db, actor.id, organizationId, taskId, body);
     broadcastOrgEvent(organizationId, { type: "COMMENT_ADDED", actor, taskId, commentId: c.id });
+    pingInboxes(organizationId, c.notified);
     return { comment: { id: c.id, body: c.body, createdAt: c.createdAt.toISOString(), authorName: actor.name, authorId: actor.id } };
   });
 }

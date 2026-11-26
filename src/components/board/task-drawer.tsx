@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, SlidersHorizontal, Tag as TagIcon, Timer, Users, Flag, GitMerge, Loader2, MessageSquare, Plus, Send, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
+import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, SlidersHorizontal, Tag as TagIcon, Timer, Users, Flag, GitMerge, Loader2, MessageSquare, Plus, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
 import type { TaskPriority } from "@/db/schema";
 import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -26,6 +26,7 @@ import type { TaskDecor } from "./decor";
 import type { SprintDTO } from "@/server/services/sprints";
 import { TYPE_META, TypeIcon, WORK_ITEM_TYPES } from "./task-meta";
 import type { BoardCtx } from "./kanban-board";
+import { AttachmentsSection, CommentBody, CommentComposer, LinkedDocs, TimeSection } from "./drawer-collab";
 
 type Comment = { id: string; body: string; createdAt: string; authorName: string | null; authorId: string | null };
 /** Editable form state; empty string = "no value" for optional fields. */
@@ -205,6 +206,7 @@ export function TaskDrawer(props: {
       }
     >
       <ParentLink ctx={ctx} task={task} allTasks={props.allTasks} onOpenTask={props.onOpenTask} />
+      <LinkedDocs ctx={ctx} task={task} />
       {props.viewers.length > 0 && (
         <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-violet-400/25 bg-violet-400/[0.07] px-3 py-2.5 text-[15px] text-violet-800">
           <div className="flex -space-x-1.5">
@@ -402,6 +404,8 @@ export function TaskDrawer(props: {
         </Section>
       )}
 
+      <TimeSection ctx={ctx} task={task} />
+      <AttachmentsSection ctx={ctx} task={task} />
       <SubtasksSection {...breakdown} />
       <ChecklistSection {...breakdown} />
       <DependenciesSection {...breakdown} />
@@ -477,31 +481,25 @@ export function TaskDrawer(props: {
                   <span className="text-[15px] font-medium">{c.authorName ?? "Deleted user"}</span>
                   <span className="text-[13px] text-subtle">{timeAgo(c.createdAt)}</span>
                 </div>
-                <p className="mt-0.5 whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">{c.body}</p>
+                <CommentBody body={c.body} meId={ctx.me.id} />
               </div>
             </div>
           ))}
         </div>
         {can(ctx.role, "COMMENT") && (
-          <form
-            className="mt-4 flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const body = comment.trim();
-              if (!body) return;
-              start(async () => {
-                const r = await addCommentAction(ctx.org.id, task.id, body);
-                if (!r.ok) return void toast.error(r.message);
-                setComments((cs) => [...cs, r.comment]);
-                setComment("");
-              });
+          <CommentComposer
+            ctx={ctx}
+            pending={pending}
+            onSend={async (body) => {
+              const r = await addCommentAction(ctx.org.id, task.id, body);
+              if (!r.ok) {
+                toast.error(r.message);
+                return false;
+              }
+              setComments((cs) => [...cs, r.comment]);
+              return true;
             }}
-          >
-            <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Write a comment…" maxLength={5000} />
-            <Button variant="subtle" disabled={pending || !comment.trim()} aria-label="Send comment">
-              <Send className="h-3.5 w-3.5" />
-            </Button>
-          </form>
+          />
         )}
       </Section>
     </Sheet>
