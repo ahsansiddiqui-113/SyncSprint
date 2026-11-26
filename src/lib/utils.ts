@@ -39,3 +39,10 @@ export function avatarColor(id: string) {
   for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return palette[h % palette.length]!;
 }
+
+/** Locale-independent date ("Dec 10, 2026") so the server and the browser render identical text. */
+const dayFmt = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+export const formatDay = (iso: string | Date | null | undefined) => (iso ? dayFmt.format(new Date(iso)) : "—");
+const dtFmt = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
+export const formatDateTimeUtc = (iso: string | Date) => `${dtFmt.format(new Date(iso))} UTC`;
+export const formatMoney = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;

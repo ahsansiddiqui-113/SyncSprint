@@ -3,7 +3,8 @@
  * Mentions are stored inline as @[Display Name](user-uuid); the editor shows "@Display Name".
  */
 
-export const MENTION_SOURCE = String.raw`@\[([^\]\n]{1,80})\]\(([0-9a-f-]{36})\)`;
+/** People: @[Name](user-uuid). Groups: @[QA](team:team-uuid). */
+export const MENTION_SOURCE = String.raw`@\[([^\]\n]{1,80})\]\(((?:team:)?[0-9a-f-]{36})\)`;
 
 export type MentionPart = { kind: "text"; text: string } | { kind: "mention"; name: string; userId: string };
 

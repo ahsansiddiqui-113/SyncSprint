@@ -16,9 +16,11 @@ beforeAll(async () => {
 });
 
 describe("role hierarchy", () => {
-  it("orders owner > admin > member > viewer", () => {
+  it("orders admin > member > viewer; legacy owner is just an admin", () => {
     expect(hasRole("owner", "admin")).toBe(true);
-    expect(hasRole("admin", "owner")).toBe(false);
+    expect(hasRole("admin", "owner")).toBe(true);
+    expect(hasRole("admin", "member")).toBe(true);
+    expect(hasRole("member", "admin")).toBe(false);
     expect(hasRole("member", "viewer")).toBe(true);
     expect(hasRole("viewer", "member")).toBe(false);
     expect(can("member", "CREATE_OR_MOVE_TASK")).toBe(true);
@@ -62,29 +64,32 @@ describe("member", () => {
   });
 
   it("cannot escalate their own role", async () => {
-    await expect(changeMemberRole(db, T.member.id, { organizationId: T.org.id, userId: T.member.id, role: "owner" })).rejects.toMatchObject({ code: "FORBIDDEN_REQUIRES_ADMIN" });
+    await expect(changeMemberRole(db, T.member.id, { organizationId: T.org.id, userId: T.member.id, role: "admin" })).rejects.toMatchObject({ code: "FORBIDDEN_REQUIRES_ADMIN" });
   });
 });
 
-describe("admin vs owner rules", () => {
+describe("admin rules (the customer's top role)", () => {
   it("admin can change member ↔ viewer", async () => {
     await expect(changeMemberRole(db, T.admin.id, { organizationId: T.org.id, userId: T.viewer.id, role: "member" })).resolves.toEqual({ from: "viewer", to: "member" });
     await changeMemberRole(db, T.admin.id, { organizationId: T.org.id, userId: T.viewer.id, role: "viewer" });
   });
 
-  it("admin cannot grant ownership or touch an owner", async () => {
-    await expect(changeMemberRole(db, T.admin.id, { organizationId: T.org.id, userId: T.member.id, role: "owner" })).rejects.toMatchObject({ code: "FORBIDDEN_REQUIRES_OWNER" });
-    await expect(changeMemberRole(db, T.admin.id, { organizationId: T.org.id, userId: T.owner.id, role: "viewer" })).rejects.toMatchObject({ code: "FORBIDDEN_REQUIRES_OWNER" });
-    await expect(removeMember(db, T.admin.id, T.org.id, T.owner.id)).rejects.toMatchObject({ code: "FORBIDDEN_REQUIRES_OWNER" });
+  it("whoever creates a workspace is its admin; the legacy owner role can't be granted", async () => {
+    await expect(requireOrgPermission(T.owner.id, T.org.id, "viewer", db)).resolves.toBe("admin");
+    await expect(changeMemberRole(db, T.admin.id, { organizationId: T.org.id, userId: T.member.id, role: "owner" as never })).rejects.toThrow();
   });
 
-  it("the last owner can never be demoted or leave", async () => {
-    await expect(changeMemberRole(db, T.owner.id, { organizationId: T.org.id, userId: T.owner.id, role: "admin" })).rejects.toMatchObject({ code: "CONFLICT" });
+  it("the last admin can never be demoted or leave", async () => {
+    // Two admins: one can step down...
+    await changeMemberRole(db, T.owner.id, { organizationId: T.org.id, userId: T.admin.id, role: "member" });
+    // ...but the last one can't.
+    await expect(changeMemberRole(db, T.owner.id, { organizationId: T.org.id, userId: T.owner.id, role: "member" })).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(removeMember(db, T.owner.id, T.org.id, T.owner.id)).rejects.toMatchObject({ code: "CONFLICT" });
+    await changeMemberRole(db, T.owner.id, { organizationId: T.org.id, userId: T.admin.id, role: "admin" });
   });
 
   it("demo role switching is refused outside demo workspaces", async () => {
-    await expect(switchDemoRole(db, T.member.id, T.org.id, "owner")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(switchDemoRole(db, T.member.id, T.org.id, "admin")).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
 
@@ -100,7 +105,9 @@ describe("invites", () => {
     await expect(acceptInvite(db, invitee.id, invite.token)).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("admins cannot mint owner invites", async () => {
-    await expect(createInvite(db, T.admin.id, { organizationId: T.org.id, email: "boss@x.io", role: "owner" })).rejects.toMatchObject({ code: "FORBIDDEN_REQUIRES_OWNER" });
+  it("admins can invite admins, but nobody can mint the legacy owner role", async () => {
+    await expect(createInvite(db, T.admin.id, { organizationId: T.org.id, email: "boss@x.io", role: "admin" })).resolves.toMatchObject({ role: "admin" });
+    await expect(createInvite(db, T.admin.id, { organizationId: T.org.id, email: "boss2@x.io", role: "owner" as never })).rejects.toThrow();
+    await expect(createInvite(db, T.member.id, { organizationId: T.org.id, email: "boss3@x.io", role: "admin" })).rejects.toMatchObject({ code: "FORBIDDEN_REQUIRES_ADMIN" });
   });
 });

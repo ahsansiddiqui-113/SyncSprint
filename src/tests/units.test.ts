@@ -95,7 +95,7 @@ describe("client board reducer", () => {
   const t = (id: string, v: number, col = "c1", pos = 1024): TaskDTO => ({
     id, organizationId: "o", projectId: "p", columnId: col, taskNumber: 1, title: id, description: null,
     priority: "medium", assigneeId: null, position: pos, version: v, updatedAt: "", createdAt: "",
-    startDate: null, dueDate: null, storyPoints: null, estimateHours: null, parentId: null, type: "task", sprintId: null,
+    startDate: null, dueDate: null, storyPoints: null, estimateHours: null, parentId: null, type: "task", sprintId: null, teamId: null,
   });
 
   it("ignores stale or duplicate server packets (incoming.version <= local.version)", () => {

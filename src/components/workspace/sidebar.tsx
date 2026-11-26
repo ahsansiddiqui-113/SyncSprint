@@ -4,17 +4,18 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Activity, ChevronsUpDown, FileText, Goal, Home, Inbox, LogOut, Plug, Plus, ShieldCheck, Users } from "lucide-react";
+import { Activity, Building2, ChevronsUpDown, CreditCard, FileText, Goal, Home, Inbox, Link2, LogOut, Plug, Plus, ShieldCheck, Users, UsersRound } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
+import { isAdminRole } from "@/lib/rbac-shared";
 import { switchDemoRoleAction } from "@/actions/demo.actions";
 import { Avatar } from "@/components/ui/avatar";
 import { RoleBadge } from "@/components/ui/badge";
 import { Logo } from "@/components/ui/card";
 import { TimerPill, useUnreadCount } from "./live-widgets";
 
-const ROLES: OrgRole[] = ["owner", "admin", "member", "viewer"];
+const ROLES: OrgRole[] = ["admin", "member", "viewer"];
 const SPACE_COLORS = ["#7b68ee", "#ff9800", "#2db87d", "#e44a8a", "#49ccf9", "#f5a623"];
 
 export function Sidebar({
@@ -23,7 +24,9 @@ export function Sidebar({
   role,
   orgs,
   projects,
+  platformAdmin = false,
 }: {
+  platformAdmin?: boolean;
   user: { id: string; name: string; email: string; image: string | null };
   org: { id: string; slug: string; name: string; isDemo: boolean };
   role: OrgRole;
@@ -41,9 +44,19 @@ export function Sidebar({
     { href: `${base}/inbox`, label: "Inbox", icon: Inbox, active: path.endsWith("/inbox"), badge: unread },
     { href: `${base}/docs`, label: "Docs", icon: FileText, active: path.includes("/docs") },
     { href: `${base}/goals`, label: "Goals", icon: Goal, active: path.endsWith("/goals") },
+    { href: `${base}/groups`, label: "Groups", icon: UsersRound, active: path.includes("/groups") },
     { href: `${base}/activity`, label: "Activity", icon: Activity, active: path.endsWith("/activity") },
+  ];
+  const admin = isAdminRole(role);
+  const settings = [
     { href: `${base}/settings/members`, label: "Members", icon: Users, active: path.endsWith("/settings/members") },
-    ...(role === "owner" || role === "admin" ? [{ href: `${base}/settings/integrations`, label: "Integrations", icon: Plug, active: path.endsWith("/settings/integrations") }] : []),
+    ...(admin
+      ? [
+          { href: `${base}/settings/billing`, label: "Billing & plan", icon: CreditCard, active: path.endsWith("/settings/billing") },
+          { href: `${base}/settings/sharing`, label: "Share links", icon: Link2, active: path.endsWith("/settings/sharing") },
+          { href: `${base}/settings/integrations`, label: "Integrations", icon: Plug, active: path.endsWith("/settings/integrations") },
+        ]
+      : []),
   ];
 
   return (
@@ -81,7 +94,7 @@ export function Sidebar({
             key={i.href}
             href={i.href}
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2 text-[15px] font-medium text-muted transition-colors hover:bg-hover hover:text-foreground",
+              "flex items-center gap-3 rounded-lg px-3 py-1.5 text-[15px] font-medium text-muted transition-colors hover:bg-hover hover:text-foreground",
               i.active && "bg-primary-soft text-primary hover:bg-primary-soft hover:text-primary"
             )}
           >
@@ -94,6 +107,28 @@ export function Sidebar({
             )}
           </Link>
         ))}
+      </nav>
+
+      <nav aria-label="Workspace settings" className="mt-3 space-y-0.5 px-3">
+        <div className="px-3 pb-1 text-[13px] font-semibold text-subtle">Workspace</div>
+        {settings.map((i) => (
+          <Link
+            key={i.href}
+            href={i.href}
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-1.5 text-[14.5px] font-medium text-muted transition-colors hover:bg-hover hover:text-foreground",
+              i.active && "bg-primary-soft text-primary hover:bg-primary-soft hover:text-primary"
+            )}
+          >
+            <i.icon className="h-[17px] w-[17px]" />
+            {i.label}
+          </Link>
+        ))}
+        {platformAdmin && (
+          <Link href="/platform" className="flex items-center gap-3 rounded-lg px-3 py-1.5 text-[14.5px] font-medium text-primary transition-colors hover:bg-primary-soft">
+            <Building2 className="h-[17px] w-[17px]" /> SyncSprint console
+          </Link>
+        )}
       </nav>
 
       <div className="mt-5 flex-1 overflow-y-auto px-3">
@@ -135,7 +170,7 @@ export function Sidebar({
             <div className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-primary">
               <ShieldCheck className="h-4 w-4" /> Demo · act as role
             </div>
-            <div className="grid grid-cols-4 gap-1 rounded-lg bg-white p-1 shadow-card">
+            <div className="grid grid-cols-3 gap-1 rounded-lg bg-white p-1 shadow-card">
               {ROLES.map((r) => (
                 <button
                   key={r}

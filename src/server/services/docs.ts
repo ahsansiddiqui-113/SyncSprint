@@ -4,6 +4,7 @@ import type { DB } from "@/db";
 import { auditLogs, docTasks, docs, projects, tasks, users } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { requireOrgPermission } from "@/lib/rbac";
+import { isAdminRole } from "@/lib/rbac-shared";
 
 /**
  * Docs: workspace wiki pages in markdown. Saving uses the same optimistic
@@ -112,7 +113,7 @@ export async function deleteDoc(conn: DB, actorId: string, organizationId: strin
   return conn.transaction(async (tx) => {
     const [d] = await tx.select({ id: docs.id, title: docs.title, createdById: docs.createdById }).from(docs).where(and(eq(docs.id, docId), eq(docs.organizationId, organizationId))).limit(1);
     if (!d) throw new AppError("NOT_FOUND", "Doc not found");
-    if (d.createdById !== actorId && role !== "owner" && role !== "admin") throw new AppError("FORBIDDEN", "Only the author or an admin can delete this doc");
+    if (d.createdById !== actorId && !isAdminRole(role)) throw new AppError("FORBIDDEN", "Only the author or an admin can delete this doc");
     await tx.delete(docs).where(eq(docs.id, docId));
     await tx.insert(auditLogs).values({ organizationId, actorId, action: "DOC_DELETED", entityType: "doc", entityId: docId, metadata: { title: d.title } });
   });

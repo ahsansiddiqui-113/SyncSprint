@@ -20,6 +20,8 @@ export type TaskDTO = {
   parentId: string | null;
   type: "epic" | "story" | "task" | "bug";
   sprintId: string | null;
+  /** Group queue this task is assigned to (QA, Devs...). */
+  teamId: string | null;
   updatedAt: string;
   createdAt: string;
 };

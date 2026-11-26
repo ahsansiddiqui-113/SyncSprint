@@ -1,9 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   auditLogs,
   automations,
+  teams,
+  teamMembers,
   taskRecurrences,
   docTasks,
   docs,
@@ -39,7 +41,7 @@ import { moveTask, updateTask } from "./tasks";
 type SeedTask = { title: string; priority: TaskPriority; column: number; assignee?: number; description?: string };
 
 const TEAMMATES = [
-  { name: "Sara Chen", role: "owner" as const },
+  { name: "Sara Chen", role: "admin" as const },
   { name: "Alex Rivera", role: "admin" as const },
   { name: "Priya Patel", role: "member" as const },
   { name: "Marcus Lee", role: "viewer" as const },
@@ -93,7 +95,7 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
       .returning();
 
     await tx.insert(orgMembers).values([
-      { organizationId: orgId, userId: ownerUserId, role: "owner" },
+      { organizationId: orgId, userId: ownerUserId, role: "admin" },
       ...mates.map((u, i) => ({ organizationId: orgId, userId: u.id, role: TEAMMATES[i]!.role })),
     ]);
 
@@ -412,6 +414,30 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
         })
         .returning();
       await tx.insert(taskRecurrences).values({ taskId: weekly!.id, organizationId: orgId, frequency: "weekly", interval: 1, occurrences: 3, createdById: priya.id });
+
+      // Groups: Developers, QA and Product, with work in their queues.
+      const marcus = mates[3]!;
+      const [devs, qa, product] = await tx
+        .insert(teams)
+        .values([
+          { organizationId: orgId, name: "Developers", handle: "devs", color: "#7b68ee", description: "Builds and ships the product.", leadId: alex.id },
+          { organizationId: orgId, name: "QA", handle: "qa", color: "#0f9d74", description: "Testing, release checks and bug triage.", leadId: priya.id },
+          { organizationId: orgId, name: "Product", handle: "product", color: "#dd6b00", description: "Roadmap, specs and customer feedback.", leadId: sara.id },
+        ])
+        .returning();
+      await tx.insert(teamMembers).values([
+        ...[alex.id, priya.id, ownerUserId].map((userId) => ({ organizationId: orgId, teamId: devs!.id, userId })),
+        ...[priya.id, marcus.id].map((userId) => ({ organizationId: orgId, teamId: qa!.id, userId })),
+        ...[sara.id, ownerUserId].map((userId) => ({ organizationId: orgId, teamId: product!.id, userId })),
+      ]);
+      await tx.update(tasks).set({ teamId: devs!.id }).where(inArray(tasks.id, [byNumber(5).id, byNumber(6).id, billing.id]));
+      await tx.update(tasks).set({ teamId: qa!.id }).where(eq(tasks.id, byNumber(8).id));
+      // An unassigned task waiting in QA's queue.
+      const [qaq] = await tx.update(projects).set({ taskCounter: sql`${projects.taskCounter} + 1` }).where(eq(projects.id, projectId)).returning({ n: projects.taskCounter });
+      await tx.insert(tasks).values({
+        organizationId: orgId, projectId, columnId: engCols[0]!.id, taskNumber: qaq!.n, title: "Regression pass on the billing flow", priority: "high", type: "task",
+        teamId: qa!.id, estimateHours: 3, dueDate: day(3), position: 96 * POSITION_STEP, createdAt: minutesAgo(60 * 5), updatedAt: minutesAgo(60 * 5),
+      });
       void projectId;
     }
 
@@ -507,6 +533,7 @@ async function requireDemoContext(conn: DB, userId: string, organizationId: stri
  * A seeded teammate stays owner, so the "last owner" invariant still holds.
  */
 export async function switchDemoRole(conn: DB, userId: string, organizationId: string, role: OrgRole) {
+  if (!["admin", "member", "viewer"].includes(role)) throw new AppError("VALIDATION", "Pick admin, member or viewer");
   await requireDemoContext(conn, userId, organizationId);
   await conn.transaction(async (tx) => {
     const [prev] = await tx

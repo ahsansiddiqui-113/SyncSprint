@@ -18,6 +18,7 @@ import {
 import { AppError } from "@/lib/errors";
 import { POSITION_STEP } from "@/lib/fractional-index";
 import { requireOrgPermission } from "@/lib/rbac";
+import { isAdminRole } from "@/lib/rbac-shared";
 import { notifyAssigned } from "./notifications";
 import { TAG_COLORS } from "@/lib/tag-colors";
 import { recordSprintSnapshots } from "./sprints";
@@ -372,7 +373,7 @@ export async function updateSavedView(conn: DB, actorId: string, organizationId:
   const role = await requireOrgPermission(actorId, organizationId, "viewer", conn);
   const [v] = await conn.select().from(savedViews).where(and(eq(savedViews.id, viewId), eq(savedViews.organizationId, organizationId))).limit(1);
   if (!v || (v.ownerId !== actorId && !v.shared)) throw new AppError("NOT_FOUND", "View not found");
-  const isAdmin = role === "owner" || role === "admin";
+  const isAdmin = isAdminRole(role);
   if (v.ownerId !== actorId && !isAdmin) throw new AppError("FORBIDDEN", "Only the person who created this view can change it");
   const patch: Partial<typeof savedViews.$inferInsert> = { updatedAt: new Date() };
   if (raw.name !== undefined) patch.name = z.string().trim().min(1).max(60).parse(raw.name);
@@ -386,7 +387,7 @@ export async function deleteSavedView(conn: DB, actorId: string, organizationId:
   const role = await requireOrgPermission(actorId, organizationId, "viewer", conn);
   const [v] = await conn.select().from(savedViews).where(and(eq(savedViews.id, viewId), eq(savedViews.organizationId, organizationId))).limit(1);
   if (!v || (v.ownerId !== actorId && !v.shared)) throw new AppError("NOT_FOUND", "View not found");
-  if (v.ownerId !== actorId && !(role === "owner" || role === "admin")) throw new AppError("FORBIDDEN", "Only the person who created this view can delete it");
+  if (v.ownerId !== actorId && !isAdminRole(role)) throw new AppError("FORBIDDEN", "Only the person who created this view can delete it");
   await conn.delete(savedViews).where(eq(savedViews.id, viewId));
   return { projectId: v.projectId };
 }

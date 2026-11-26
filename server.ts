@@ -49,6 +49,10 @@ ${signal} received — shutting down…`);
   // Dev: apply newly generated migrations without a restart. Otherwise hot-reloaded
   // schema code can query columns the database doesn't have yet.
   if (dev) {
+    // Schema code is loaded once at boot; hot reload does not reliably refresh it for every layer.
+    watch("src/db/schema.ts", () =>
+      console.warn("\n⚠ src/db/schema.ts changed: restart the dev server (Ctrl+C, then npm run dev) so every part of the app uses the new schema.\n")
+    );
     let timer: ReturnType<typeof setTimeout> | undefined;
     watch(MIGRATIONS_FOLDER, { recursive: true }, () => {
       clearTimeout(timer);

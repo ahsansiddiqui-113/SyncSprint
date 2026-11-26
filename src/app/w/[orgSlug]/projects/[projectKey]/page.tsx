@@ -3,12 +3,14 @@ import { toTaskDTO } from "@/lib/realtime-protocol";
 import { aiConfigured } from "@/lib/ai-router";
 import { loadWorkspace, orNotFound } from "@/server/page-guards";
 import { getBoard } from "@/server/services/workspace";
+import { listTeams } from "@/server/services/teams";
 import { KanbanBoard } from "@/components/board/kanban-board";
 
 export default async function BoardPage({ params }: { params: Promise<{ orgSlug: string; projectKey: string }> }) {
   const { orgSlug, projectKey } = await params;
   const { user } = await loadWorkspace(orgSlug);
   const board = await orNotFound(() => getBoard(db, user.id, orgSlug, projectKey));
+  const teams = await listTeams(db, user.id, board.org.id);
 
   return (
     <KanbanBoard
@@ -22,6 +24,7 @@ export default async function BoardPage({ params }: { params: Promise<{ orgSlug:
       initialTasks={board.tasks.map(toTaskDTO)}
       members={board.members.map((m) => ({ id: m.userId, name: m.name, avatarUrl: m.avatarUrl, role: m.role }))}
       aiEnabled={aiConfigured()}
+      teams={teams.map((t) => ({ id: t.id, name: t.name, handle: t.handle, color: t.color }))}
     />
   );
 }

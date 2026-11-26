@@ -17,11 +17,19 @@ export type TaskDecor = {
   openBlockers: Map<string, string[]>;
   deps: ProjectMeta["deps"];
   recurrences: ProjectMeta["recurrences"];
+  /** Group chip per task (QA, Devs...). */
+  teamByTask: Map<string, { name: string; color: string }>;
 };
 
 export const EMPTY_META: ProjectMeta = { checklist: {}, tagsByTask: {}, tags: [], deps: [], fields: [], fieldValues: {}, coAssignees: {}, watchers: {}, recurrences: {} };
 
-export function buildDecor(tasks: Record<string, TaskDTO>, meta: ProjectMeta, doneColumnId: string | null): TaskDecor {
+export function buildDecor(tasks: Record<string, TaskDTO>, meta: ProjectMeta, doneColumnId: string | null, teams: { id: string; name: string; color: string }[] = []): TaskDecor {
+  const teamById = new Map(teams.map((t) => [t.id, t]));
+  const teamByTask = new Map<string, { name: string; color: string }>();
+  for (const t of Object.values(tasks)) {
+    const team = t.teamId ? teamById.get(t.teamId) : undefined;
+    if (team) teamByTask.set(t.id, team);
+  }
   const subtasks = new Map<string, { done: number; total: number }>();
   for (const t of Object.values(tasks)) {
     if (!t.parentId) continue;
@@ -47,5 +55,6 @@ export function buildDecor(tasks: Record<string, TaskDTO>, meta: ProjectMeta, do
     openBlockers,
     deps: meta.deps,
     recurrences: meta.recurrences ?? {},
+    teamByTask,
   };
 }

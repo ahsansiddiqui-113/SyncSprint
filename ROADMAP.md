@@ -77,7 +77,17 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
 - ✅ **Webhooks**: `task.created`, `task.updated`, `task.deleted`, `comment.created`, signed with HMAC-SHA256 (`SyncSprint-Signature: t=…,v1=…`), delivered after the response (Next `after`), https + public addresses only (checked after DNS, again at delivery), no redirects, 5 s timeout, delivery log, test button, auto-off after 15 failures
 - ✅ **Horizontal realtime**: optional Postgres `LISTEN/NOTIFY` fan-out (`REALTIME_FANOUT=postgres`) so several app servers share live updates; oversized task events are re-read from the database by receivers
 
-## Phase 7 — Visual planning (next)
+## Phase 7 — Business: roles, groups, billing, sharing ✅
+- ✅ **Roles**: the customer's top role is **Admin** (the person the workspace is handed to; adds members, manages billing). Existing owners were migrated to admin; the last admin can never be removed or demoted. Members do the work; **viewers** see everything, change nothing, and are free
+- ✅ **Platform owner** (the vendor) is not a workspace role. Recognised by `PLATFORM_ADMIN_USER_IDS` or `PLATFORM_ADMIN_EMAILS` (verified emails only in production). Console at `/platform`: every company's plan, status, seats and revenue; suspend / reactivate, extend trial or grace, complimentary plan, cancel at period end or now, provision a company with an admin invite, event history. No access to customer work unless the company's admin turns on time-limited, read-only **support access**
+- ✅ **Plans** (about half the price of ClickUp, Jira, Asana, monday.com): Pay as you go $5/person/month; Team (1-50) $3.50/person/month yearly; Business (51-100) $3/person/month yearly; viewers free; 14-day trial; above 100 contact us
+- ✅ **Billing lifecycle**: trial → active; failed payment → 7-day grace (full access, banner) → read-only for 14 days (view and export) → locked (admins can still reach Billing); canceled → access until the paid period ends; platform suspension locks at once and is never lifted by a payment; data kept 90 days after locking. Enforced in the one server-side guard every action and the API go through; outgoing webhooks pause too
+- ✅ **Seats**: admins and members are paid seats; going over a plan's limit gives a 7-day grace with an upgrade prompt, then paid invites are refused; the subscription's seat count follows the team automatically (prorated)
+- ✅ **Polar** (merchant of record: tax, invoices, payouts incl. Pakistan): hosted checkout for seat-based products, customer portal, seat sync, Standard Webhooks signature verification, idempotent event handling, billing history. A local-only simulator runs the same code without a card
+- ✅ **Groups** (QA, Developers, Marketing...): lead + members, admins or the lead manage members; assign tasks to a group (its queue until someone takes them); @group mentions notify everyone; group pages track open work, queue, overdue, finished per week, hours logged and this week's workload; automations can filter by and send to a group
+- ✅ **Share links**: read-only links for people without an account. Admin-only, one project by default or the whole workspace on purpose, optional expiry and password (scrypt, 10 tries per 15 minutes), optional comments, hashed tokens, view counts, revocable; never shows emails; no indexing, framing or referrer leaks; stop working while a workspace is locked
+
+## Phase 8 — Visual planning (next)
 - ⬜ Whiteboard / mind map view
 - ⬜ Gantt baselines and critical path
 - ⬜ Portfolio view across projects

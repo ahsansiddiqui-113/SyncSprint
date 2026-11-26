@@ -4,6 +4,7 @@ import type { DB, DbOrTx } from "@/db";
 import { auditLogs, projects, tasks, timeEntries, users } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { requireOrgPermission } from "@/lib/rbac";
+import { isAdminRole } from "@/lib/rbac-shared";
 
 /**
  * Time tracking: start/stop timer (one running per person, enforced by a partial
@@ -117,7 +118,7 @@ export async function deleteEntry(conn: DB, actorId: string, organizationId: str
   return conn.transaction(async (tx) => {
     const [e] = await tx.select().from(timeEntries).where(and(eq(timeEntries.id, entryId), eq(timeEntries.organizationId, organizationId))).limit(1);
     if (!e) throw new AppError("NOT_FOUND", "Time entry not found");
-    if (e.userId !== actorId && role !== "owner" && role !== "admin") throw new AppError("FORBIDDEN", "You can only delete your own time");
+    if (e.userId !== actorId && !isAdminRole(role)) throw new AppError("FORBIDDEN", "You can only delete your own time");
     await tx.delete(timeEntries).where(eq(timeEntries.id, entryId));
     const task = await taskInOrg(tx, organizationId, e.taskId);
     return { projectId: task.projectId };

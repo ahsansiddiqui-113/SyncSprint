@@ -88,5 +88,6 @@ const ROLE: Record<OrgRole, string> = {
 };
 
 export function RoleBadge({ role }: { role: OrgRole }) {
-  return <Badge className={cn("capitalize", ROLE[role])}>{role}</Badge>;
+  const shown = role === "owner" ? "admin" : role; // legacy alias
+  return <Badge className={cn("capitalize", ROLE[shown])}>{shown}</Badge>;
 }

@@ -25,6 +25,9 @@ const STATUS: Record<string, number> = {
   CONFLICT: 409,
   VERSION_CONFLICT: 409,
   QUOTA_EXCEEDED: 413,
+  WORKSPACE_READ_ONLY: 402,
+  WORKSPACE_LOCKED: 402,
+  SEAT_LIMIT: 402,
 };
 
 export function apiError(status: number, code: string, message: string, extra: Record<string, unknown> = {}, headers?: HeadersInit) {

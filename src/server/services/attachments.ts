@@ -3,6 +3,7 @@ import type { DB } from "@/db";
 import { attachments, auditLogs, tasks, users } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { requireOrgPermission } from "@/lib/rbac";
+import { isAdminRole } from "@/lib/rbac-shared";
 
 /**
  * Task attachments, stored in Postgres (bytea) so the app runs on serverless hosts
@@ -114,7 +115,7 @@ export async function deleteAttachment(conn: DB, actorId: string, organizationId
       .where(and(eq(attachments.id, attachmentId), eq(attachments.organizationId, organizationId)))
       .limit(1);
     if (!row) throw new AppError("NOT_FOUND", "Attachment not found");
-    if (row.uploadedById !== actorId && role !== "owner" && role !== "admin") {
+    if (row.uploadedById !== actorId && !isAdminRole(role)) {
       throw new AppError("FORBIDDEN", "Only the uploader or an admin can delete this file");
     }
     await tx.delete(attachments).where(eq(attachments.id, attachmentId));

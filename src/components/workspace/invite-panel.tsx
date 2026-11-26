@@ -39,7 +39,6 @@ export function InvitePanel({ organizationId, actorRole, invites }: { organizati
           {(["admin", "member", "viewer"] as const).map((r) => (
             <option key={r} value={r}>{r}</option>
           ))}
-          {actorRole === "owner" && <option value="owner">owner</option>}
         </Select>
         <Button disabled={pending}>Create link</Button>
       </form>

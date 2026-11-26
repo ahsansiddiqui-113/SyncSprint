@@ -60,6 +60,7 @@ export function NewTaskDialog({
   const [points, setPoints] = useState("");
   const [type, setType] = useState<WorkItemType>("task");
   const [sprintId, setSprintId] = useState("");
+  const [teamId, setTeamId] = useState("");
   const [triage, setTriage] = useState<{ rationale: string; provider: string; labels: string[] } | null>(null);
   const [pending, start] = useTransition();
   const [aiPending, startAi] = useTransition();
@@ -83,6 +84,7 @@ export function NewTaskDialog({
               estimateHours: estimate === "" ? null : Math.round(Number(estimate) * 4) / 4,
               type,
               sprintId: sprintId || null,
+              teamId: teamId || null,
             }, todayISO());
             if (!r.ok) return void toast.error(r.message);
             onCreated(r.task);
@@ -152,7 +154,7 @@ export function NewTaskDialog({
             </Select>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <div className="space-y-1">
             <Label htmlFor="n-type">Type</Label>
             <Select id="n-type" value={type} onChange={(e) => setType(e.target.value as WorkItemType)}>
@@ -166,6 +168,13 @@ export function NewTaskDialog({
               {sprints.filter((s) => s.status !== "completed").map((s) => (
                 <option key={s.id} value={s.id}>{s.name}{s.status === "active" ? " (active)" : ""}</option>
               ))}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="n-team">Group</Label>
+            <Select id="n-team" value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+              <option value="">No group</option>
+              {ctx.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </Select>
           </div>
         </div>
