@@ -25,8 +25,10 @@ export const inviteStatusEnum = pgEnum("invite_status", ["pending", "accepted", 
 export const sprintStatusEnum = pgEnum("sprint_status", ["planned", "active", "completed"]);
 export const customFieldTypeEnum = pgEnum("custom_field_type", ["text", "number", "select", "date", "person"]);
 export const timeOffKindEnum = pgEnum("time_off_kind", ["vacation", "sick", "holiday", "other"]);
-export const notificationKindEnum = pgEnum("notification_kind", ["mention", "assigned", "comment", "completed", "capacity"]);
+export const notificationKindEnum = pgEnum("notification_kind", ["mention", "assigned", "comment", "completed", "capacity", "automation"]);
 export const keyResultKindEnum = pgEnum("key_result_kind", ["number", "tasks"]);
+export const recurrenceFrequencyEnum = pgEnum("recurrence_frequency", ["daily", "weekdays", "weekly", "monthly"]);
+export const apiKeyScopeEnum = pgEnum("api_key_scope", ["read", "write"]);
 
 /** Postgres bytea for small attachments (kept in the database so serverless hosts need no extra storage). */
 const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
@@ -701,6 +703,147 @@ export const keyResultTasks = pgTable(
   (t) => [primaryKey({ columns: [t.keyResultId, t.taskId] }), index("kr_tasks_task_idx").on(t.organizationId, t.taskId)]
 );
 
+// 7n. Automations: "when <trigger> and <conditions> then <actions>", per project
+export type AutomationTrigger =
+  | { kind: "task_created" }
+  | { kind: "status_changed"; toColumnId: string | null }
+  | { kind: "assignee_changed" }
+  | { kind: "priority_changed"; to: "low" | "medium" | "high" | "urgent" | null };
+export type AutomationCondition = { field: "priority" | "type" | "assignee" | "tag"; op: "is" | "is_not"; value: string | null };
+export type AutomationAction =
+  | { type: "move_to_status"; columnId: string }
+  | { type: "set_assignee"; userId: string | "actor" | null }
+  | { type: "set_priority"; priority: "low" | "medium" | "high" | "urgent" }
+  | { type: "add_tag"; tagId: string }
+  | { type: "set_due_in_days"; days: number }
+  | { type: "add_comment"; body: string }
+  | { type: "notify"; target: "assignee" | "watchers" | "user"; userId?: string | null; message: string };
+
+export const automations = pgTable(
+  "automations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    trigger: jsonb("trigger").$type<AutomationTrigger>().notNull(),
+    conditions: jsonb("conditions").$type<AutomationCondition[]>().default([]).notNull(),
+    actions: jsonb("actions").$type<AutomationAction[]>().notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    runCount: integer("run_count").default(0).notNull(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index("automations_project_idx").on(t.organizationId, t.projectId)]
+);
+
+export const automationRuns = pgTable(
+  "automation_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    ok: boolean("ok").notNull(),
+    detail: varchar("detail", { length: 300 }).notNull(),
+    ...timestamps,
+  },
+  (t) => [index("automation_runs_idx").on(t.automationId, t.createdAt)]
+);
+
+// 7o. Recurring tasks: when the task reaches Done, the next occurrence is created and the rule moves to it
+export const taskRecurrences = pgTable(
+  "task_recurrences",
+  {
+    taskId: uuid("task_id")
+      .primaryKey()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    frequency: recurrenceFrequencyEnum("frequency").notNull(),
+    interval: integer("interval").default(1).notNull(),
+    /** How many occurrences have been created so far (for "3rd time" context). */
+    occurrences: integer("occurrences").default(0).notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [check("task_recurrences_interval", sql`${t.interval} between 1 and 12`)]
+);
+
+// 7p. Public API keys (hashed; the token is shown once) and outgoing webhooks
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** The key acts as this person, capped at its scope. */
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 80 }).notNull(),
+    prefix: varchar("prefix", { length: 16 }).notNull(),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    scope: apiKeyScopeEnum("scope").notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("api_keys_hash_idx").on(t.tokenHash), index("api_keys_org_idx").on(t.organizationId)]
+);
+
+export const webhooks = pgTable(
+  "webhooks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    url: varchar("url", { length: 500 }).notNull(),
+    /** Shared signing secret (HMAC-SHA256); needed in clear to sign, like Stripe/GitHub. */
+    secret: varchar("secret", { length: 80 }).notNull(),
+    events: jsonb("events").$type<string[]>().notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
+    lastStatus: integer("last_status"),
+    lastDeliveryAt: timestamp("last_delivery_at", { withTimezone: true }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [index("webhooks_org_idx").on(t.organizationId)]
+);
+
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    webhookId: uuid("webhook_id")
+      .notNull()
+      .references(() => webhooks.id, { onDelete: "cascade" }),
+    event: varchar("event", { length: 60 }).notNull(),
+    statusCode: integer("status_code"),
+    ok: boolean("ok").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    error: varchar("error", { length: 300 }),
+    ...timestamps,
+  },
+  (t) => [index("webhook_deliveries_idx").on(t.webhookId, t.createdAt)]
+);
+
 // 8. Task comments
 export const taskComments = pgTable(
   "task_comments",
@@ -713,6 +856,8 @@ export const taskComments = pgTable(
       .notNull()
       .references(() => tasks.id, { onDelete: "cascade" }),
     authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
+    /** Set when an automation wrote the comment (shown as the automation, not a person). */
+    automationId: uuid("automation_id").references((): AnyPgColumn => automations.id, { onDelete: "set null" }),
     body: text("body").notNull(),
     ...timestamps,
   },
@@ -778,3 +923,7 @@ export type TimeEntry = typeof timeEntries.$inferSelect;
 export type Doc = typeof docs.$inferSelect;
 export type Goal = typeof goals.$inferSelect;
 export type KeyResult = typeof keyResults.$inferSelect;
+export type Automation = typeof automations.$inferSelect;
+export type RecurrenceFrequency = (typeof recurrenceFrequencyEnum.enumValues)[number];
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type Webhook = typeof webhooks.$inferSelect;

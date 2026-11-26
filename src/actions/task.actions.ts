@@ -12,6 +12,9 @@ import * as svc from "@/server/services/tasks";
 import { capacityWarnings, type CapacityWarning } from "@/server/services/capacity";
 import { taskAssignees } from "@/db/schema";
 import { alertManagers, pingInboxes } from "@/server/inbox-broadcast";
+import { publishEffects, publishTaskUpdate } from "@/server/after-task-change";
+import { publishEvent, publishTask, toPublicTasks } from "@/server/public-events";
+import { newEffects } from "@/server/services/task-effects";
 
 /**
  * Advisory only: the change is already saved. Computed for everyone assigned to
@@ -36,11 +39,13 @@ const CAPACITY_FIELDS = ["assigneeId", "estimateHours", "startDate", "dueDate"];
 export async function createTaskAction(input: Parameters<typeof svc.createTask>[2], today?: string) {
   return toResult(async () => {
     const actor = await requireActor();
-    const task = await svc.createTask(db, actor.id, input);
+    const fx = newEffects(today);
+    const task = await svc.createTask(db, actor.id, input, fx);
     const dto = toTaskDTO(task);
     broadcastOrgEvent(task.organizationId, { type: "TASK_CREATED", actor, task: dto });
+    publishTask(task.organizationId, "task.created", task);
+    publishEffects(task.organizationId, actor, task.projectId, fx);
     const warnings = task.assigneeId && task.estimateHours ? await warningsForTask(task.organizationId, task, today) : [];
-    pingInboxes(task.organizationId, task.assigneeId && task.assigneeId !== actor.id ? [task.assigneeId] : []);
     await alertManagers(task.organizationId, actor.id, task.id, warnings);
     return { task: dto, warnings };
   });
@@ -52,10 +57,11 @@ export async function moveTaskAction(input: {
   targetColumnId: string;
   newPosition: number;
   expectedVersion: number;
-}) {
+}, today?: string) {
   return toResult(async () => {
     const actor = await requireActor();
-    const res = await svc.moveTask(db, actor.id, input);
+    const fx = newEffects(today);
+    const res = await svc.moveTask(db, actor.id, input, fx);
     if (!res.ok) {
       return { conflict: true as const, current: res.current ? toTaskDTO(res.current) : null };
     }
@@ -65,7 +71,8 @@ export async function moveTaskAction(input: {
       broadcastOrgEvent(input.organizationId, { type: "COLUMN_REBALANCED", columnId: task.columnId, positions: res.rebalanced });
     }
     broadcastOrgEvent(input.organizationId, { type: "TASK_UPDATED", actor, task, action: "moved" });
-    pingInboxes(input.organizationId, res.notified);
+    publishTaskUpdate(input.organizationId, res.task, ["status"]);
+    publishEffects(input.organizationId, actor, res.task.projectId, fx);
     return { conflict: false as const, task, rebalanced: res.rebalanced };
   });
 }
@@ -73,12 +80,14 @@ export async function moveTaskAction(input: {
 export async function updateTaskAction(input: Parameters<typeof svc.updateTask>[2], today?: string) {
   return toResult(async () => {
     const actor = await requireActor();
-    const res = await svc.updateTask(db, actor.id, input);
+    const fx = newEffects(today);
+    const res = await svc.updateTask(db, actor.id, input, fx);
     if (!res.ok) return { conflict: true as const, current: res.current ? toTaskDTO(res.current) : null };
     const task = toTaskDTO(res.task);
     broadcastOrgEvent(input.organizationId, { type: "TASK_UPDATED", actor, task, action: "edited", changes: res.changes });
+    publishTaskUpdate(input.organizationId, res.task, res.changes);
+    publishEffects(input.organizationId, actor, res.task.projectId, fx);
     const warnings = res.changes.some((c) => CAPACITY_FIELDS.includes(c)) ? await warningsForTask(input.organizationId, res.task, today) : [];
-    pingInboxes(input.organizationId, res.notified);
     await alertManagers(input.organizationId, actor.id, res.task.id, warnings);
     return { conflict: false as const, task, warnings };
   });
@@ -89,6 +98,7 @@ export async function deleteTaskAction(organizationId: string, taskId: string) {
     const actor = await requireActor();
     const deleted = await svc.deleteTask(db, actor.id, organizationId, taskId);
     broadcastOrgEvent(organizationId, { type: "TASK_DELETED", actor, taskId, projectId: deleted.projectId });
+    publishEvent(organizationId, "task.deleted", async () => ({ task: (await toPublicTasks(db, organizationId, [deleted]))[0] }));
     return {};
   });
 }
@@ -99,6 +109,10 @@ export async function addCommentAction(organizationId: string, taskId: string, b
     const c = await svc.addComment(db, actor.id, organizationId, taskId, body);
     broadcastOrgEvent(organizationId, { type: "COMMENT_ADDED", actor, taskId, commentId: c.id });
     pingInboxes(organizationId, c.notified);
+    publishEvent(organizationId, "comment.created", async () => ({
+      comment: { id: c.id, body: c.body, createdAt: c.createdAt.toISOString(), author: { id: actor.id, name: actor.name } },
+      task: (await toPublicTasks(db, organizationId, (await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1))))[0],
+    }));
     return { comment: { id: c.id, body: c.body, createdAt: c.createdAt.toISOString(), authorName: actor.name, authorId: actor.id } };
   });
 }

@@ -51,6 +51,16 @@ function describe(action: string, meta: Record<string, unknown>, ref: string | u
     case "GOAL_CREATED": return `created the goal “${meta.title}”`;
     case "GOAL_DELETED": return `deleted the goal “${meta.title}”`;
     case "KEY_RESULT_UPDATED": return `checked in a key result at ${meta.currentValue}`;
+    case "AUTOMATION_CREATED": return `created the automation “${meta.name}”`;
+    case "AUTOMATION_UPDATED": return `updated the automation “${meta.name}”${meta.enabled === false ? " (off)" : ""}`;
+    case "AUTOMATION_DELETED": return `deleted the automation “${meta.name}”`;
+    case "AUTOMATION_RAN": return `triggered “${meta.automation}” on ${target}: ${Array.isArray(meta.did) ? meta.did.join(", ") : ""}`;
+    case "RECURRENCE_SET": return meta.removed ? `stopped ${target} from repeating` : `set ${target} to repeat ${meta.frequency}${Number(meta.interval) > 1 ? ` every ${meta.interval}` : ""}`;
+    case "TASKS_IMPORTED": return `imported ${meta.count} tasks into ${meta.key}`;
+    case "API_KEY_CREATED": return `created the API key “${meta.name}” (${meta.scope})`;
+    case "API_KEY_REVOKED": return `revoked the API key “${meta.name}”`;
+    case "WEBHOOK_CREATED": return `added a webhook to ${meta.url}`;
+    case "WEBHOOK_DELETED": return `removed the webhook to ${meta.url}`;
     default: return action.toLowerCase().replaceAll("_", " ");
   }
 }

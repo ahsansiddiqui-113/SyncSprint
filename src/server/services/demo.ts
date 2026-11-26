@@ -3,6 +3,8 @@ import { and, asc, eq, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   auditLogs,
+  automations,
+  taskRecurrences,
   docTasks,
   docs,
   goals,
@@ -375,6 +377,41 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
       await tx.insert(keyResults).values([
         { organizationId: orgId, goalId: reliability!.id, title: "p95 latency of board moves", kind: "number", startValue: 480, targetValue: 200, currentValue: 260, unit: "ms", position: POSITION_STEP },
       ]);
+      // Phase 6: two automations and a recurring chore.
+      const engCols = await tx.select({ id: boardColumns.id, title: boardColumns.title }).from(boardColumns).where(eq(boardColumns.projectId, projectId)).orderBy(asc(boardColumns.position));
+      const doneCol = engCols[engCols.length - 1]!;
+      const progressCol = engCols[1]!;
+      await tx.insert(automations).values([
+        {
+          organizationId: orgId, projectId, name: "Assign on start", createdById: sara.id, runCount: 7, lastRunAt: minutesAgo(60 * 3),
+          trigger: { kind: "status_changed", toColumnId: progressCol.id }, conditions: [{ field: "assignee", op: "is", value: null }],
+          actions: [{ type: "set_assignee", userId: "actor" }],
+        },
+        {
+          organizationId: orgId, projectId, name: "Urgent bugs first", createdById: alex.id, runCount: 2, lastRunAt: minutesAgo(60 * 26),
+          trigger: { kind: "task_created" },
+          conditions: [{ field: "type", op: "is", value: "bug" }, { field: "priority", op: "is", value: "urgent" }],
+          actions: [{ type: "move_to_status", columnId: progressCol.id }, { type: "set_due_in_days", days: 1 }, { type: "notify", target: "user", userId: alex.id, message: "Urgent bug — please take a look today." }],
+        },
+        {
+          organizationId: orgId, projectId, name: "Done → watchers", createdById: sara.id, enabled: false,
+          trigger: { kind: "status_changed", toColumnId: doneCol.id }, conditions: [],
+          actions: [{ type: "notify", target: "watchers", message: "This is done. Check it out." }],
+        },
+      ]);
+      const [chore] = await tx
+        .update(projects)
+        .set({ taskCounter: sql`${projects.taskCounter} + 1` })
+        .where(eq(projects.id, projectId))
+        .returning({ n: projects.taskCounter });
+      const [weekly] = await tx
+        .insert(tasks)
+        .values({
+          organizationId: orgId, projectId, columnId: engCols[0]!.id, taskNumber: chore!.n, title: "Weekly dependency updates", priority: "low", type: "task",
+          assigneeId: priya.id, estimateHours: 1.5, dueDate: day(4), position: 95 * POSITION_STEP, createdAt: minutesAgo(60 * 24 * 20), updatedAt: minutesAgo(60 * 24),
+        })
+        .returning();
+      await tx.insert(taskRecurrences).values({ taskId: weekly!.id, organizationId: orgId, frequency: "weekly", interval: 1, occurrences: 3, createdById: priya.id });
       void projectId;
     }
 

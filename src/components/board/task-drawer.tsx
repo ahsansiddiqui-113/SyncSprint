@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, SlidersHorizontal, Tag as TagIcon, Timer, Users, Flag, GitMerge, Loader2, MessageSquare, Plus, Sparkles, Trash2, UserRound, Wand2 } from "lucide-react";
+import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, SlidersHorizontal, Tag as TagIcon, Timer, Users, Flag, GitMerge, Loader2, MessageSquare, Plus, Repeat, Sparkles, Trash2, UserRound, Wand2, Zap } from "lucide-react";
 import type { TaskPriority } from "@/db/schema";
 import type { PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -26,9 +26,9 @@ import type { TaskDecor } from "./decor";
 import type { SprintDTO } from "@/server/services/sprints";
 import { TYPE_META, TypeIcon, WORK_ITEM_TYPES } from "./task-meta";
 import type { BoardCtx } from "./kanban-board";
-import { AttachmentsSection, CommentBody, CommentComposer, LinkedDocs, TimeSection } from "./drawer-collab";
+import { AttachmentsSection, CommentBody, CommentComposer, LinkedDocs, RepeatField, TimeSection } from "./drawer-collab";
 
-type Comment = { id: string; body: string; createdAt: string; authorName: string | null; authorId: string | null };
+type Comment = { id: string; body: string; createdAt: string; authorName: string | null; authorId: string | null; viaAutomation?: boolean; automationName?: string | null };
 /** Editable form state; empty string = "no value" for optional fields. */
 function draftFrom(t: TaskDTO) {
   return {
@@ -356,6 +356,9 @@ export function TaskDrawer(props: {
             {datesInvalid && <span className="text-[13px] text-red-600">Start must be on or before due</span>}
           </div>
 
+          <span className="flex items-center gap-2 text-[15px] text-subtle"><Repeat className="h-3.5 w-3.5" /> Repeat</span>
+          <RepeatField ctx={ctx} task={task} rule={props.meta.recurrences[task.id]} onChanged={props.onMetaChanged} />
+
           <span className="flex items-center gap-2 text-[15px] text-subtle"><TagIcon className="h-3.5 w-3.5" /> Tags</span>
           <TagsField ctx={ctx} task={task} decor={props.decor} onMetaChanged={props.onMetaChanged} />
 
@@ -475,10 +478,16 @@ export function TaskDrawer(props: {
           {comments.length === 0 && <p className="text-[15px] text-subtle">No comments yet — start the discussion.</p>}
           {comments.map((c) => (
             <div key={c.id} className="flex gap-3">
-              <Avatar id={c.authorId ?? "x"} name={c.authorName ?? "Deleted user"} size={26} />
-              <div className="min-w-0 flex-1 rounded-xl rounded-tl-sm border border-border bg-elevated px-3 py-2">
+              {c.viaAutomation ? (
+                <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700" title="Automation">
+                  <Zap className="h-3.5 w-3.5" />
+                </span>
+              ) : (
+                <Avatar id={c.authorId ?? "x"} name={c.authorName ?? "Deleted user"} size={26} />
+              )}
+              <div className={cn("min-w-0 flex-1 rounded-xl rounded-tl-sm border px-3 py-2", c.viaAutomation ? "border-violet-200 bg-violet-50/60" : "border-border bg-elevated")}>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[15px] font-medium">{c.authorName ?? "Deleted user"}</span>
+                  <span className="text-[15px] font-medium">{c.viaAutomation ? `Automation · ${c.automationName ?? "deleted rule"}` : (c.authorName ?? "Deleted user")}</span>
                   <span className="text-[13px] text-subtle">{timeAgo(c.createdAt)}</span>
                 </div>
                 <CommentBody body={c.body} meId={ctx.me.id} />

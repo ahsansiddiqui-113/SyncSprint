@@ -102,7 +102,7 @@ The version bump and the `audit_logs` insert share one `db.transaction()`. A rej
 - Events are published only **after commit**, so peers never see writes that might roll back.
 - Clients ignore stale or duplicate packets (`incoming.version <= local.version`). After a reconnect they re-fetch a snapshot, because missed events are not replayed.
 - Presence (`{projectId, activeTaskId, editing}`) is ephemeral and never written to Postgres. Removing a member evicts their live sockets.
-- **Trade-off:** the hub is in-process. To scale horizontally, swap `publish()` for Redis pub/sub or Postgres `LISTEN/NOTIFY`; the room contract stays the same.
+- **Several servers?** Set `REALTIME_FANOUT=postgres` (with a direct, unpooled `DATABASE_URL_UNPOOLED`): each instance delivers to its own sockets and relays to the others over Postgres `LISTEN/NOTIFY`. Task events too big for a NOTIFY payload (8 KB) are sent as a reference and re-read from the database by the receiver.
 
 ### 5. Optimistic UI and rollback
 Drag → the reducer moves the card immediately → the server action runs. On `VERSION_CONFLICT` the client restores the server's row, re-syncs the board and shows a toast explaining **what** changed (for example *"Alex moved ENG-4 to Review and changed priority from medium to high 12s ago"*). The task drawer keeps your unsaved edits on conflict and offers "load their version".
@@ -123,7 +123,7 @@ Drag → the reducer moves the card immediately → the server action runs. On `
 
 ---
 
-## Tests (`src/tests`, 138 tests)
+## Tests (`src/tests`, 162 tests)
 
 Each file gets a fresh in-memory PGlite Postgres, migrated from the real SQL migrations.
 
@@ -137,6 +137,8 @@ Each file gets a fresh in-memory PGlite Postgres, migrated from the real SQL mig
 - **Work breakdown:** subtasks are one level deep, same project and tenant, and cascade on delete; checklist roll-up and permissions; tags are per-tenant and case-insensitive; dependency cycles, duplicates, cross-tenant links and self-links (also blocked by a database CHECK) are rejected; the demo seed produces consistent data.
 - **Planning:** start/due/points validation (incl. impossible dates and partial edits checked against the stored row), reschedule under OCC, viewer can't reschedule, dashboard series counts + tenant isolation, UTC date maths, filters.
 - **Collaboration:** notifications skip the actor, dedupe per person (mention beats comment), never reach other tenants, fire on assignment / reassignment / new co-assignees / Done; inbox is personal and mark-read only touches your own; manager capacity alerts once per person per day; one running timer (service + unique index), manual entries, totals, delete rules; attachment name/type sanitising, size limits, membership-checked reads, uploader/admin delete; docs search, task links, OCC conflict on concurrent saves; goal progress for numeric (incl. decreasing) and task-based key results; mention encoding and duration parsing; demo seed.
+- **Automation:** trigger matching, admin-only management, references checked against the project/tenant, actions in one change (assign the mover, tag, labelled comment, notify), conditions and disabled rules, no automation loops while Done side effects still happen, failed runs when a target was deleted, automation-set assignees get notified; recurring date maths (weekdays, month-end clamp, catch-up), next occurrence copies people/tags/unchecked checklist and moves the rule, no duplicates on re-completion.
+- **Integrations:** API keys (hash only, revoke, orphaned keys), rate limiting; REST routes end to end (auth, read-only scope, create by status name and assignee email, get by ref, move + edit with `expectedVersion` → 409 on stale, unknown fields rejected, comments, filtered list, delete, tenant isolation, demoted owner loses write); webhook SSRF guards (private/loopback/link-local/metadata, http, credentials, odd ports), signature verify incl. replay window, subscribed delivery, auto-off after 15 failures, redirects not followed; CSV parsing and formula neutralising, Jira preview mapping with warnings, atomic import with parents and labels, export round trip, limits; sprint capacity; cross-instance realtime fan-out with oversized-event reload.
 - **Units:** midpoint maths, prompt-injection fencing, AI fallback, keyword triage, and the client reducer ignoring stale packets.
 
 ---

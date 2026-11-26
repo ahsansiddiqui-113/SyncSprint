@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { AtSign, BellOff, CheckCheck, CheckCircle2, Gauge, MessageSquare, UserPlus } from "lucide-react";
+import { AtSign, BellOff, CheckCheck, CheckCircle2, Gauge, MessageSquare, UserPlus, Zap } from "lucide-react";
 import type { NotificationKind } from "@/db/schema";
 import { listNotificationsAction, markNotificationsReadAction } from "@/actions/collab.actions";
 import { Avatar } from "@/components/ui/avatar";
@@ -31,6 +31,7 @@ const KIND: Record<NotificationKind, { label: string; icon: typeof AtSign; tone:
   comment: { label: "Comment", icon: MessageSquare, tone: "bg-sky-100 text-sky-800" },
   completed: { label: "Completed", icon: CheckCircle2, tone: "bg-emerald-100 text-emerald-800" },
   capacity: { label: "Workload", icon: Gauge, tone: "bg-rose-100 text-rose-800" },
+  automation: { label: "Automation", icon: Zap, tone: "bg-violet-100 text-violet-800" },
 };
 
 const TABS = [

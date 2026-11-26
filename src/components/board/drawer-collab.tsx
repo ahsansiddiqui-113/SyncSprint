@@ -19,6 +19,7 @@ import {
   stopTimerAction,
   taskTimeAction,
 } from "@/actions/collab.actions";
+import { setRecurrenceAction } from "@/actions/automation.actions";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -471,3 +472,57 @@ export function LinkedDocs({ ctx, task }: { ctx: BoardCtx; task: TaskDTO }) {
   );
 }
 
+
+/* ------------------------------------ repeat ------------------------------------ */
+
+const FREQ_LABEL = { daily: "day", weekdays: "weekday", weekly: "week", monthly: "month" } as const;
+type Freq = keyof typeof FREQ_LABEL;
+
+/** "Repeat every 2 weeks": when the task is done, the next one is created automatically. */
+export function RepeatField({ ctx, task, rule, onChanged }: { ctx: BoardCtx; task: TaskDTO; rule: { frequency: Freq; interval: number } | undefined; onChanged: () => void }) {
+  const [pending, start] = useTransition();
+  const canEdit = can(ctx.role, "CREATE_OR_MOVE_TASK");
+  const save = (next: { frequency: Freq; interval: number } | null) =>
+    start(async () => {
+      const r = await setRecurrenceAction(ctx.org.id, task.id, next);
+      if (!r.ok) return void toast.error(r.message);
+      onChanged();
+    });
+  if (!canEdit) {
+    return <span className="text-[15px]">{rule ? `Every ${rule.interval > 1 ? `${rule.interval} ` : ""}${FREQ_LABEL[rule.frequency]}${rule.interval > 1 ? "s" : ""}` : <span className="text-subtle">Doesn't repeat</span>}</span>;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        aria-label="Repeat"
+        disabled={pending}
+        value={rule?.frequency ?? ""}
+        onChange={(e) => save(e.target.value ? { frequency: e.target.value as Freq, interval: rule?.interval ?? 1 } : null)}
+        className="h-8 cursor-pointer rounded-md border border-border bg-white px-2 text-[14px] outline-none hover:border-border-strong focus:border-primary"
+      >
+        <option value="">Doesn't repeat</option>
+        <option value="daily">Daily</option>
+        <option value="weekdays">Every weekday</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+      </select>
+      {rule && (
+        <>
+          <span className="text-[14px] text-muted">every</span>
+          <select
+            aria-label="Repeat interval"
+            disabled={pending}
+            value={rule.interval}
+            onChange={(e) => save({ frequency: rule.frequency, interval: Number(e.target.value) })}
+            className="h-8 cursor-pointer rounded-md border border-border bg-white px-2 text-[14px] outline-none hover:border-border-strong focus:border-primary"
+          >
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+              <option key={n} value={n}>{n} {FREQ_LABEL[rule.frequency]}{n > 1 ? "s" : ""}</option>
+            ))}
+          </select>
+          <span className="text-[13px] text-subtle">· next one is created when this is done</span>
+        </>
+      )}
+    </div>
+  );
+}

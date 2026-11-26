@@ -38,9 +38,14 @@ const PHASES: { name: string; status: Status; items: string[] }[] = [
     items: ["@mentions and notifications inbox", "Time tracking", "File attachments", "Docs linked to tasks", "Goals and OKRs"],
   },
   {
-    name: "Automation",
+    name: "Automation & integrations",
+    status: "shipped",
+    items: ["Automations (when this happens, do that)", "Recurring tasks", "Sprint capacity planning", "Import from CSV and Jira", "REST API and webhooks"],
+  },
+  {
+    name: "Visual planning",
     status: "next",
-    items: ["Automations (when this happens, do that)", "Recurring tasks", "Capacity per sprint", "Whiteboards", "Import from CSV and Jira"],
+    items: ["Whiteboards and mind maps", "Gantt baselines and critical path", "Portfolio view across projects", "Scheduled automations"],
   },
 ];
 

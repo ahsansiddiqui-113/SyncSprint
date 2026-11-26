@@ -22,6 +22,7 @@ import { PriorityFlag } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Sheet } from "../sheet";
+import { SprintCapacity } from "./sprint-capacity";
 import { BreakdownBadges, PointsBadge, TypeIcon } from "../task-meta";
 import {
   ChartFrame,
@@ -99,6 +100,7 @@ export function SprintsView(props: Props) {
               onEdit={() => setEditing(active)}
               onComplete={() => setCompleting(active)}
             >
+              <SprintCapacity organizationId={props.organizationId} sprintId={active.id} signature={sig(inSprint(active.id))} />
               <TaskZone id={zoneOf(active.id)} tasks={inSprint(active.id)} props={props} empty="Drag tasks from the backlog to add them to this sprint." />
             </ActiveSprintCard>
           ) : (
@@ -142,6 +144,7 @@ export function SprintsView(props: Props) {
                   )}
                 </header>
                 {s.goal && <p className="flex items-center gap-2 px-5 pt-3 text-[14px] text-muted"><Target className="h-4 w-4" /> {s.goal}</p>}
+                <SprintCapacity organizationId={props.organizationId} sprintId={s.id} signature={sig(ts)} />
                 <TaskZone id={zoneOf(s.id)} tasks={ts} props={props} empty="Drag tasks here to plan this sprint." />
               </section>
             );
@@ -233,6 +236,9 @@ export function SprintsView(props: Props) {
 }
 
 /* ---------------------------------- pieces --------------------------------- */
+
+/** Changes whenever a sprint task is added, removed, re-estimated, reassigned or moved. */
+const sig = (ts: TaskDTO[]) => ts.map((t) => `${t.id}:${t.version}`).join(",");
 
 function DateRange({ s }: { s: SprintDTO }) {
   if (!s.startDate || !s.endDate) return null;

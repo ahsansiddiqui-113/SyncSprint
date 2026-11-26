@@ -1,4 +1,4 @@
-import { Ban, Bookmark, Bug, CalendarDays, CornerDownRight, GitBranch, ListChecks, SquareCheck, Zap } from "lucide-react";
+import { Ban, Bookmark, Bug, CalendarDays, CornerDownRight, GitBranch, ListChecks, Repeat, SquareCheck, Zap } from "lucide-react";
 import type { WorkItemType } from "@/db/schema";
 import { dueState, relativeDueLabel, type DueState } from "@/lib/dates";
 import { cn } from "@/lib/utils";
@@ -90,7 +90,8 @@ export function BreakdownBadges({ taskId, decor, maxTags = 3, className }: { tas
   const check = decor.checklist[taskId];
   const subs = decor.subtasks.get(taskId);
   const blockers = decor.openBlockers.get(taskId)?.length ?? 0;
-  if (!tags.length && !check && !subs && !blockers) return null;
+  const repeat = decor.recurrences?.[taskId];
+  if (!tags.length && !check && !subs && !blockers && !repeat) return null;
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
       {blockers > 0 && (
@@ -99,6 +100,11 @@ export function BreakdownBadges({ taskId, decor, maxTags = 3, className }: { tas
           className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-1.5 py-0.5 text-[12.5px] font-semibold text-red-600"
         >
           <Ban className="h-3.5 w-3.5" /> Blocked
+        </span>
+      )}
+      {repeat && (
+        <span title={`Repeats ${repeat.frequency}${repeat.interval > 1 ? ` (every ${repeat.interval})` : ""}`} className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 text-[12.5px] font-medium text-muted">
+          <Repeat className="h-3.5 w-3.5" /> {repeat.frequency === "weekdays" ? "Weekdays" : repeat.frequency[0]!.toUpperCase() + repeat.frequency.slice(1)}
         </span>
       )}
       {subs && <Progress icon={GitBranch} done={subs.done} total={subs.total} label="Subtasks" />}

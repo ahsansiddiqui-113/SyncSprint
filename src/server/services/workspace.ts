@@ -429,6 +429,8 @@ export const AUDIT_ACTIONS = [
   "DOC_UPDATED",
   "GOAL_CREATED",
   "KEY_RESULT_UPDATED",
+  "AUTOMATION_RAN",
+  "TASKS_IMPORTED",
 ] as const;
 
 export async function listAuditLogs(

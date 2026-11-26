@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Activity, ChevronsUpDown, FileText, Goal, Home, Inbox, LogOut, Plus, ShieldCheck, Users } from "lucide-react";
+import { Activity, ChevronsUpDown, FileText, Goal, Home, Inbox, LogOut, Plug, Plus, ShieldCheck, Users } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -42,7 +42,8 @@ export function Sidebar({
     { href: `${base}/docs`, label: "Docs", icon: FileText, active: path.includes("/docs") },
     { href: `${base}/goals`, label: "Goals", icon: Goal, active: path.endsWith("/goals") },
     { href: `${base}/activity`, label: "Activity", icon: Activity, active: path.endsWith("/activity") },
-    { href: `${base}/settings/members`, label: "Members", icon: Users, active: path.includes("/settings/") },
+    { href: `${base}/settings/members`, label: "Members", icon: Users, active: path.endsWith("/settings/members") },
+    ...(role === "owner" || role === "admin" ? [{ href: `${base}/settings/integrations`, label: "Integrations", icon: Plug, active: path.endsWith("/settings/integrations") }] : []),
   ];
 
   return (

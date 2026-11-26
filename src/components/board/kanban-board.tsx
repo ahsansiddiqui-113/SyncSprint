@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarDays, ChartGantt, ChevronRight, Eye, Gauge, Kanban, LayoutDashboard, List as ListIcon, Plus, Rocket, Settings2, Shuffle, Sparkles, Table2 } from "lucide-react";
+import { ArrowDownUp, CalendarDays, ChartGantt, ChevronRight, Eye, Gauge, Kanban, LayoutDashboard, List as ListIcon, MoreHorizontal, Plus, Rocket, Settings2, Shuffle, Sparkles, Table2, Zap } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import type { OrgEvent, PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -36,6 +36,9 @@ import { SprintsView } from "./views/sprints-view";
 import { TableView, type SortState, type WeekLoad } from "./views/table-view";
 import { WorkloadView } from "./views/workload-view";
 import { CustomizePanel } from "./customize-panel";
+import { AutomationsPanel } from "./automations-panel";
+import { ImportExportPanel } from "./import-export-panel";
+import { Popover } from "@/components/ui/popover";
 import { ViewsMenu, type GroupBy } from "./views-menu";
 import { showCapacityWarnings } from "./capacity-warnings";
 import { getWorkloadAction } from "@/actions/capacity.actions";
@@ -103,6 +106,8 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const [sort, setSort] = useState<SortState>(null);
   const [groupBy, setGroupBy] = useState<GroupBy>("status");
   const [showCustomize, setShowCustomize] = useState(false);
+  const [showAutomations, setShowAutomations] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   /** Bumped on anything that changes workload (task edits, co-assignees, capacity settings). */
   const [workloadKey, setWorkloadKey] = useState(0);
   const [weekLoad, setWeekLoad] = useState<WeekLoad>(new Map());
@@ -287,7 +292,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   async function commitMove(task: TaskDTO, columnId: string, position: number) {
     dispatch({ type: "optimisticMove", taskId: task.id, columnId, position });
     ownWrites.current.add(`${task.id}:${task.version + 1}`);
-    const res = await moveTaskAction({ organizationId: org.id, taskId: task.id, targetColumnId: columnId, newPosition: position, expectedVersion: task.version });
+    const res = await moveTaskAction({ organizationId: org.id, taskId: task.id, targetColumnId: columnId, newPosition: position, expectedVersion: task.version }, todayISO());
     if (!res.ok) {
       dispatch({ type: "force", task });
       toast.error(res.code.startsWith("FORBIDDEN") ? "Your role doesn't allow moving tasks." : res.message);
@@ -417,6 +422,21 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
                 <Settings2 className="h-4 w-4" /> Customize
               </Button>
             )}
+            <Button variant="outline" size="sm" onClick={() => setShowAutomations(true)} title="When something happens, do the busywork automatically">
+              <Zap className="h-4 w-4" /> Automate
+            </Button>
+            <Popover
+              align="right"
+              trigger={() => (
+                <Button variant="outline" size="sm" aria-label="More project actions">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              )}
+            >
+              <button onClick={() => setShowImport(true)} className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[15px] hover:bg-hover">
+                <ArrowDownUp className="h-4 w-4 text-subtle" /> Import & export CSV
+              </button>
+            </Popover>
             <Button variant="ai" size="sm" onClick={() => setShowDigest(true)}>
               <Sparkles className="h-4 w-4" /> AI standup
             </Button>
@@ -575,6 +595,21 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
         />
       )}
       {showDigest && <DigestPanel ctx={ctx} onClose={() => setShowDigest(false)} />}
+      {showAutomations && <AutomationsPanel ctx={ctx} tags={meta.tags} onClose={() => setShowAutomations(false)} />}
+      {showImport && (
+        <ImportExportPanel
+          ctx={ctx}
+          onClose={() => setShowImport(false)}
+          onImported={(ts) => {
+            for (const t of ts) {
+              ownWrites.current.add(`${t.id}:${t.version}`);
+              dispatch({ type: "server", task: t });
+            }
+            loadMeta();
+            router.refresh();
+          }}
+        />
+      )}
       {showCustomize && (
         <CustomizePanel
           organizationId={org.id}
