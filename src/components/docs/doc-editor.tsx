@@ -168,6 +168,8 @@ export function DocEditor({
     <main className="w-full px-10 py-8 2xl:px-14">
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <nav className="flex min-w-0 items-center gap-1.5 text-[14.5px] text-subtle" aria-label="Breadcrumb">
+          <Link href={`/w/${org.slug}`} className="hover:text-foreground">{org.name}</Link>
+          <ChevronRight className="h-4 w-4" />
           <Link href={`/w/${org.slug}/docs`} className="hover:text-foreground">Docs</Link>
           <ChevronRight className="h-4 w-4" />
           <span className="truncate text-foreground">{title || "Untitled"}</span>

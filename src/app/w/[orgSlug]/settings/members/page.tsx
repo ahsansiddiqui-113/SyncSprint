@@ -3,6 +3,7 @@ import { can } from "@/lib/rbac";
 import { loadWorkspace } from "@/server/page-guards";
 import { listInvites, listMembers } from "@/server/services/workspace";
 import { Card, PageHeader } from "@/components/ui/card";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { MembersTable } from "@/components/workspace/members-table";
 import { InvitePanel } from "@/components/workspace/invite-panel";
 
@@ -18,7 +19,7 @@ export default async function MembersPage({ params }: { params: Promise<{ orgSlu
   return (
     <main className="w-full px-10 py-10 2xl:px-14">
       <PageHeader
-        eyebrow={org.name}
+        eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Settings" }, { label: "Members" }]} />}
         title="Members"
         description={<>Manage who's in this workspace and what they can do. Roles: <b className="text-foreground">owner › admin › member › viewer</b>.</>}
       />

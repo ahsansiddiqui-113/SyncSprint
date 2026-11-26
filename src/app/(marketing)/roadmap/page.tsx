@@ -49,8 +49,13 @@ const PHASES: { name: string; status: Status; items: string[] }[] = [
   },
   {
     name: "Visual planning",
-    status: "next",
+    status: "shipped",
     items: ["Whiteboards and mind maps", "Gantt baselines and critical path", "Portfolio view across projects", "Scheduled automations"],
+  },
+  {
+    name: "Enterprise & reach",
+    status: "next",
+    items: ["Single sign-on and user provisioning", "Installable mobile app with offline reading", "Custom reports by email", "Slack, Teams and GitHub integrations"],
   },
 ];
 

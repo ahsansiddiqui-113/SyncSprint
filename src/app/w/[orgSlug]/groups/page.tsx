@@ -3,6 +3,7 @@ import { loadWorkspace } from "@/server/page-guards";
 import { listTeams } from "@/server/services/teams";
 import { listMembers } from "@/server/services/workspace";
 import { PageHeader } from "@/components/ui/card";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { GroupsBoard } from "@/components/groups/groups-board";
 
 export const metadata = { title: "Groups" };
@@ -14,7 +15,7 @@ export default async function GroupsPage({ params }: { params: Promise<{ orgSlug
   return (
     <main className="w-full px-10 py-10 2xl:px-14">
       <PageHeader
-        eyebrow={org.name}
+        eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Groups" }]} />}
         title="Groups"
         description="Teams like QA, Developers or Marketing. Assign work to a group, mention everyone with @handle, and track each group's load and output."
       />

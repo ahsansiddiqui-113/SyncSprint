@@ -339,7 +339,7 @@ export async function setWatching(conn: DB, actorId: string, organizationId: str
 /* ------------------------------- saved views ------------------------------- */
 
 const viewConfig = z.object({
-  view: z.enum(["board", "list", "table", "sprints", "calendar", "timeline", "dashboard", "workload"]),
+  view: z.enum(["board", "list", "table", "sprints", "calendar", "timeline", "dashboard", "workload", "whiteboards"]),
   filters: z.record(z.string(), z.unknown()),
   sort: z.object({ key: z.string().max(60), dir: z.enum(["asc", "desc"]) }).nullish(),
   groupBy: z.string().max(60).nullish(),

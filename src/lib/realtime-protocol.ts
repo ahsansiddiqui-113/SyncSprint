@@ -68,7 +68,11 @@ export type OrgEvent =
   | { type: "TIME_CHANGED"; actor: Actor; projectId: string; taskId: string; userId: string }
   | { type: "ATTACHMENTS_CHANGED"; actor: Actor; projectId: string; taskId: string }
   | { type: "DOCS_CHANGED"; actor: Actor; docId: string; version: number | null }
-  | { type: "GOALS_CHANGED"; actor: Actor };
+  | { type: "GOALS_CHANGED"; actor: Actor }
+  /** A whiteboard / mind map (or the board list) changed: open copies refetch if their revision is older. */
+  | { type: "WHITEBOARD_CHANGED"; actor: Actor; projectId: string; boardId: string; revision: number | null }
+  /** Baseline saved/deleted or a project status update posted. */
+  | { type: "PLANNING_CHANGED"; actor: Actor; projectId: string };
 
 export type ServerMessage =
   | { type: "WELCOME"; connectionId: string; userId: string }

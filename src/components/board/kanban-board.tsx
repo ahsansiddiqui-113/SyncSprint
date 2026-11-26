@@ -1,8 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { PresentationIcon } from "lucide-react";
+import { WhiteboardsView } from "./views/whiteboards-view";
 import { ArrowDownUp, CalendarDays, ChartGantt, ChevronRight, Eye, Gauge, Kanban, LayoutDashboard, List as ListIcon, Link2, MoreHorizontal, Plus, Rocket, Settings2, Shuffle, Sparkles, Table2, Zap } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import type { OrgEvent, PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
@@ -72,6 +75,7 @@ const VIEW_META: Record<ViewId, { label: string; icon: typeof Kanban }> = {
   timeline: { label: "Timeline", icon: ChartGantt },
   workload: { label: "Workload", icon: Gauge },
   dashboard: { label: "Dashboard", icon: LayoutDashboard },
+  whiteboards: { label: "Whiteboards", icon: PresentationIcon },
 };
 
 /**
@@ -393,9 +397,11 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
             </span>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 text-[13px] text-subtle">
-                <span>{org.name}</span>
+                <Link href={`/w/${org.slug}`} className="hover:text-foreground hover:underline">{org.name}</Link>
                 <ChevronRight className="h-3.5 w-3.5" />
-                <span>{project.key}</span>
+                <Link href={`/w/${org.slug}`} className="hover:text-foreground hover:underline">Projects</Link>
+                <ChevronRight className="h-3.5 w-3.5" />
+                <span aria-current="page">{project.key}</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <h1 className="truncate text-[22px] font-bold leading-tight tracking-tight">{project.name}</h1>
@@ -545,7 +551,19 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
         />
       )}
       {view === "calendar" && <CalendarView {...viewProps} onPatch={commitPatch} />}
-      {view === "timeline" && <TimelineView {...viewProps} onPatch={commitPatch} />}
+      {view === "timeline" && <TimelineView {...viewProps} onPatch={commitPatch} organizationId={org.id} projectId={project.id} canBaseline={isAdminRole(role)} />}
+      {view === "whiteboards" && (
+        <WhiteboardsView
+          organizationId={org.id}
+          projectId={project.id}
+          me={me}
+          canEdit={canEdit}
+          isAdmin={isAdminRole(role)}
+          allTasks={state.tasks}
+          refOf={refOf}
+          onOpen={setOpenTaskId}
+        />
+      )}
       {view === "dashboard" && <DashboardView {...viewProps} organizationId={org.id} projectId={project.id} filtered={visible !== state.tasks} />}
 
       {openTask && (

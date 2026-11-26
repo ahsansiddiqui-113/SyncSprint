@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Activity, Building2, ChevronsUpDown, CreditCard, FileText, Goal, Home, Inbox, Link2, LogOut, Plug, Plus, ShieldCheck, Users, UsersRound } from "lucide-react";
+import { Activity, Briefcase, Building2, ChevronsUpDown, CreditCard, FileText, Goal, Home, Inbox, Link2, LogOut, Plug, Plus, ShieldCheck, Users, UsersRound } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -43,6 +43,7 @@ export function Sidebar({
     { href: base, label: "Home", icon: Home, active: path === base },
     { href: `${base}/inbox`, label: "Inbox", icon: Inbox, active: path.endsWith("/inbox"), badge: unread },
     { href: `${base}/docs`, label: "Docs", icon: FileText, active: path.includes("/docs") },
+    { href: `${base}/portfolio`, label: "Portfolio", icon: Briefcase, active: path.endsWith("/portfolio") },
     { href: `${base}/goals`, label: "Goals", icon: Goal, active: path.endsWith("/goals") },
     { href: `${base}/groups`, label: "Groups", icon: UsersRound, active: path.includes("/groups") },
     { href: `${base}/activity`, label: "Activity", icon: Activity, active: path.endsWith("/activity") },

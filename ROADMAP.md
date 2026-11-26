@@ -87,8 +87,18 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
 - ✅ **Groups** (QA, Developers, Marketing...): lead + members, admins or the lead manage members; assign tasks to a group (its queue until someone takes them); @group mentions notify everyone; group pages track open work, queue, overdue, finished per week, hours logged and this week's workload; automations can filter by and send to a group
 - ✅ **Share links**: read-only links for people without an account. Admin-only, one project by default or the whole workspace on purpose, optional expiry and password (scrypt, 10 tries per 15 minutes), optional comments, hashed tokens, view counts, revocable; never shows emails; no indexing, framing or referrer leaks; stop working while a workspace is locked
 
-## Phase 8 — Visual planning (next)
-- ⬜ Whiteboard / mind map view
-- ⬜ Gantt baselines and critical path
-- ⬜ Portfolio view across projects
-- ⬜ Scheduled automations (e.g. "every Monday", "2 days before due")
+## Phase 8 — Visual planning ✅
+- ✅ **Gantt baselines**: admins save a snapshot of every dated task (up to 10 per project); the Timeline draws the saved plan as a grey bar under each task, a +Nd / −Nd chip where dates moved, and a "vs. baseline" summary (how many slipped, worst slip)
+- ✅ **Critical path** (CPM in working days over open tasks and "blocked by" links): toggle on the Timeline to highlight the chain in red, dim everything with slack, show slack per task in its tooltip and the earliest possible finish date
+- ✅ **Portfolio** (`/w/…/portfolio`): every project on one page with health worked out from the data (on track / at risk / late / done / not scheduled), progress against time used, open and overdue work, points, dates, active sprint, and admin-written status updates (on track, at risk, off track, on hold, complete + note)
+- ✅ **Scheduled automations**: "a due date is coming up" (N days before), "a task becomes overdue", and "on a schedule" (every day / weekday / chosen weekday at an hour in the creator's time zone). Each firing is recorded once (rule + task + occasion) so retries and several servers never double-fire; paused while a workspace is read-only or locked; runs every minute on a long-running server, from a Vercel cron (`/api/cron/automations`, `CRON_SECRET`), and is nudged by active users on serverless
+- ✅ **Whiteboards** (new project view): sticky notes, rectangles, ellipses, text, arrows that follow the items they connect, and live task cards; pan / zoom, colours, resize; turn any note into a task (the card then shows the live task). Every item is versioned so two people dragging the same note never overwrite each other silently
+- ✅ **Mind maps**: automatic left-to-right layout, Tab adds a child, Enter a sibling, collapse branches; "branch to tasks" turns each branch into a task and the ideas under it into subtasks (safe to run again after adding ideas)
+- ✅ **Breadcrumbs** on every workspace page (workspace › section › page)
+
+## Phase 9 — Enterprise & reach (proposed)
+- ⬜ SSO (SAML / OIDC) and SCIM user provisioning
+- ⬜ Mobile-friendly PWA with offline read and queued edits
+- ⬜ Advanced reporting: custom dashboards and scheduled email reports
+- ⬜ Slack / Teams / GitHub integrations (link PRs to tasks, notifications to channels)
+- ⬜ Data residency and audit-log export for compliance

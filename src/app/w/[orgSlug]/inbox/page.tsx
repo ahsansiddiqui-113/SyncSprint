@@ -1,5 +1,6 @@
 import { loadWorkspace } from "@/server/page-guards";
 import { PageHeader } from "@/components/ui/card";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { InboxList } from "@/components/workspace/inbox-list";
 
 export const metadata = { title: "Inbox" };
@@ -10,7 +11,7 @@ export default async function InboxPage({ params }: { params: Promise<{ orgSlug:
   return (
     <main className="w-full px-10 py-10 2xl:px-14">
       <PageHeader
-        eyebrow={org.name}
+        eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Inbox" }]} />}
         title="Inbox"
         description="Mentions, assignments, comments on work you follow, completed tasks and workload alerts."
       />

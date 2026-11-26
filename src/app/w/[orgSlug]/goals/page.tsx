@@ -3,6 +3,7 @@ import { loadWorkspace } from "@/server/page-guards";
 import { listGoals } from "@/server/services/goals";
 import { listMembers } from "@/server/services/workspace";
 import { PageHeader } from "@/components/ui/card";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { GoalsBoard } from "@/components/goals/goals-board";
 
 export const metadata = { title: "Goals" };
@@ -14,7 +15,7 @@ export default async function GoalsPage({ params }: { params: Promise<{ orgSlug:
   return (
     <main className="w-full px-10 py-10 2xl:px-14">
       <PageHeader
-        eyebrow={org.name}
+        eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Goals" }]} />}
         title="Goals"
         description="Objectives with measurable key results. Track a number, or let progress follow the tasks linked to it."
       />

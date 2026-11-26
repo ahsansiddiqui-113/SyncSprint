@@ -32,6 +32,10 @@ export const apiKeyScopeEnum = pgEnum("api_key_scope", ["read", "write"]);
 /** trial: 14-day free trial · payg: monthly per active user · team: yearly, up to 50 · business: yearly, 51-100 · comped: free, granted by the platform owner */
 export const planEnum = pgEnum("plan", ["trial", "payg", "team", "business", "comped"]);
 export const billingStatusEnum = pgEnum("billing_status", ["trialing", "active", "past_due", "canceled", "suspended"]);
+/** Manual project status update (portfolio), like Asana / Jira status reports. */
+export const projectStatusEnum = pgEnum("project_status", ["on_track", "at_risk", "off_track", "on_hold", "complete"]);
+export const whiteboardKindEnum = pgEnum("whiteboard_kind", ["whiteboard", "mindmap"]);
+export const whiteboardItemKindEnum = pgEnum("whiteboard_item_kind", ["note", "rect", "ellipse", "text", "arrow", "task", "node"]);
 
 /** Postgres bytea for small attachments (kept in the database so serverless hosts need no extra storage). */
 const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
@@ -209,6 +213,11 @@ export const projects = pgTable(
     description: text("description"),
     // Monotonic counter used to mint ENG-1, ENG-2, ... race-free (UPDATE ... RETURNING).
     taskCounter: integer("task_counter").default(0).notNull(),
+    /** Latest manual status update for the portfolio (null = not reported yet). */
+    status: projectStatusEnum("status"),
+    statusNote: varchar("status_note", { length: 500 }),
+    statusUpdatedAt: timestamp("status_updated_at", { withTimezone: true }),
+    statusUpdatedById: uuid("status_updated_by_id").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
     ...timestamps,
   },
   (t) => [
@@ -732,8 +741,14 @@ export type AutomationTrigger =
   | { kind: "task_created" }
   | { kind: "status_changed"; toColumnId: string | null }
   | { kind: "assignee_changed" }
-  | { kind: "priority_changed"; to: "low" | "medium" | "high" | "urgent" | null };
-export type AutomationCondition = { field: "priority" | "type" | "assignee" | "tag" | "team"; op: "is" | "is_not"; value: string | null };
+  | { kind: "priority_changed"; to: "low" | "medium" | "high" | "urgent" | null }
+  /** Scheduled: once per task when its due date is within N days (0 = due today). */
+  | { kind: "due_soon"; days: number }
+  /** Scheduled: once per task when it passes its due date unfinished. */
+  | { kind: "overdue" }
+  /** Scheduled: at a local time, for every open task matching the conditions. weekday: 0 = Monday. */
+  | { kind: "schedule"; every: "day" | "weekday" | "week"; weekday?: number; hour: number; timezone: string };
+export type AutomationCondition = { field: "priority" | "type" | "assignee" | "tag" | "team" | "status"; op: "is" | "is_not"; value: string | null };
 export type AutomationAction =
   | { type: "move_to_status"; columnId: string }
   | { type: "set_assignee"; userId: string | "actor" | null }
@@ -947,6 +962,115 @@ export const billingEvents = pgTable(
   (t) => [uniqueIndex("billing_events_external_idx").on(t.externalId), index("billing_events_org_idx").on(t.organizationId, t.createdAt)]
 );
 
+// 7t. Scheduled automations: one row per firing so a rule never fires twice for the same occasion.
+export const automationFires = pgTable(
+  "automation_fires",
+  {
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    /** Task id, or "run" for a schedule occurrence. */
+    subject: varchar("subject", { length: 40 }).notNull(),
+    /** Occasion, e.g. "due:2026-12-01" or "sch:2026-12-01". */
+    occasion: varchar("occasion", { length: 40 }).notNull(),
+    ...timestamps,
+  },
+  (t) => [primaryKey({ columns: [t.automationId, t.subject, t.occasion] })]
+);
+
+/** A lease so only one server instance runs the scheduler at a time. */
+export const schedulerLeases = pgTable("scheduler_leases", {
+  name: varchar("name", { length: 40 }).primaryKey(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }).notNull(),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+});
+
+// 7u. Gantt baselines: a frozen copy of every task's dates to compare plan vs actual.
+export const baselines = pgTable(
+  "baselines",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 80 }).notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [index("baselines_project_idx").on(t.organizationId, t.projectId)]
+);
+
+export const baselineTasks = pgTable(
+  "baseline_tasks",
+  {
+    baselineId: uuid("baseline_id")
+      .notNull()
+      .references(() => baselines.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    startDate: date("start_date", { mode: "string" }),
+    dueDate: date("due_date", { mode: "string" }),
+  },
+  (t) => [primaryKey({ columns: [t.baselineId, t.taskId] })]
+);
+
+// 7v. Whiteboards and mind maps (per project). "revision" bumps on every change so clients know to refetch.
+export const whiteboards = pgTable(
+  "whiteboards",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 80 }).notNull(),
+    kind: whiteboardKindEnum("kind").notNull(),
+    revision: integer("revision").default(1).notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("whiteboards_project_idx").on(t.organizationId, t.projectId)]
+);
+
+export const whiteboardItems = pgTable(
+  "whiteboard_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    boardId: uuid("board_id")
+      .notNull()
+      .references(() => whiteboards.id, { onDelete: "cascade" }),
+    kind: whiteboardItemKindEnum("kind").notNull(),
+    x: doublePrecision("x").default(0).notNull(),
+    y: doublePrecision("y").default(0).notNull(),
+    w: doublePrecision("w").default(200).notNull(),
+    h: doublePrecision("h").default(120).notNull(),
+    text: varchar("text", { length: 2000 }).default("").notNull(),
+    color: varchar("color", { length: 7 }).default("#fff4b8").notNull(),
+    /** Arrows connect two items; deleting either end deletes the arrow. */
+    fromId: uuid("from_id").references((): AnyPgColumn => whiteboardItems.id, { onDelete: "cascade" }),
+    toId: uuid("to_id").references((): AnyPgColumn => whiteboardItems.id, { onDelete: "cascade" }),
+    /** Mind-map parent; deleting a node deletes its branch. */
+    parentId: uuid("parent_id").references((): AnyPgColumn => whiteboardItems.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    z: doublePrecision("z").default(0).notNull(),
+    collapsed: boolean("collapsed").default(false).notNull(),
+    version: integer("version").default(1).notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [index("whiteboard_items_board_idx").on(t.boardId), index("whiteboard_items_task_idx").on(t.taskId)]
+);
+
 // 8. Task comments
 export const taskComments = pgTable(
   "task_comments",
@@ -1034,3 +1158,7 @@ export type Plan = (typeof planEnum.enumValues)[number];
 export type BillingStatus = (typeof billingStatusEnum.enumValues)[number];
 export type Team = typeof teams.$inferSelect;
 export type ShareLink = typeof shareLinks.$inferSelect;
+export type ProjectStatus = (typeof projectStatusEnum.enumValues)[number];
+export type Whiteboard = typeof whiteboards.$inferSelect;
+export type WhiteboardItem = typeof whiteboardItems.$inferSelect;
+export type WhiteboardItemKind = (typeof whiteboardItemKindEnum.enumValues)[number];

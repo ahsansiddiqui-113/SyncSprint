@@ -13,7 +13,9 @@ Multi-tenant B2B project & Kanban workspace with strict tenant isolation, role-b
 **Work breakdown:** subtasks with progress roll-up, checklists, color-coded tags, and blocked-by / blocking dependencies (with arrows on the Timeline).
 
 **Views** (ClickUp-style, all sharing one search/filter bar and live updates):
-**Board** (drag-and-drop) · **List** (grouped by status) · **Calendar** (drag to reschedule) · **Timeline** (Gantt; drag or resize bars) · **Dashboard** (KPIs, workload, created-vs-completed).
+**Board** (drag-and-drop) · **List** (grouped by status) · **Calendar** (drag to reschedule) · **Timeline** (Gantt; drag or resize bars, baselines with slip, critical path) · **Dashboard** (KPIs, workload, created-vs-completed) · **Whiteboards** (notes, shapes, arrows, live task cards, and mind maps that turn into tasks).
+
+**Visual planning:** a **Portfolio** page shows every project's health, progress against time, overdue work, sprint and status updates. **Scheduled automations** run before due dates, when work goes overdue, or every day / weekday / week at a set hour (set `CRON_SECRET` for the Vercel cron at `/api/cron/automations`).
 See [ROADMAP.md](ROADMAP.md) for the phased plan toward ClickUp / Azure Boards parity.
 
 ---
@@ -123,7 +125,7 @@ Drag → the reducer moves the card immediately → the server action runs. On `
 
 ---
 
-## Tests (`src/tests`, 186 tests)
+## Tests (`src/tests`, 198 tests)
 
 Each file gets a fresh in-memory PGlite Postgres, migrated from the real SQL migrations.
 
@@ -140,6 +142,7 @@ Each file gets a fresh in-memory PGlite Postgres, migrated from the real SQL mig
 - **Automation:** trigger matching, admin-only management, references checked against the project/tenant, actions in one change (assign the mover, tag, labelled comment, notify), conditions and disabled rules, no automation loops while Done side effects still happen, failed runs when a target was deleted, automation-set assignees get notified; recurring date maths (weekdays, month-end clamp, catch-up), next occurrence copies people/tags/unchecked checklist and moves the rule, no duplicates on re-completion.
 - **Integrations:** API keys (hash only, revoke, orphaned keys), rate limiting; REST routes end to end (auth, read-only scope, create by status name and assignee email, get by ref, move + edit with `expectedVersion` → 409 on stale, unknown fields rejected, comments, filtered list, delete, tenant isolation, demoted owner loses write); webhook SSRF guards (private/loopback/link-local/metadata, http, credentials, odd ports), signature verify incl. replay window, subscribed delivery, auto-off after 15 failures, redirects not followed; CSV parsing and formula neutralising, Jira preview mapping with warnings, atomic import with parents and labels, export round trip, limits; sprint capacity; cross-instance realtime fan-out with oversized-event reload.
 - **Billing & business:** lifecycle states (trial, grace, read-only, locked, ending, canceled, suspended, comped, demo), prices and plan fit, seat limits with 7-day grace, the guard refusing writes when read-only and everything when locked (billing still reachable by admins), viewers free, Polar Standard Webhooks signatures (tamper, replay, wrong secret), webhook idempotency, past-due → grace → recovery → revoked, manual suspension never lifted by a payment, dev simulator, platform owner detection (ids, verified emails in production), provisioning without membership, support access read-only and revocable; groups (admin/lead rules, cross-tenant refusals, queue, tracking, @group mentions, automations), share links (admin-only, scopes, hashing, no emails, revoke/expiry/lock, password + rate limit).
+- **Visual planning:** critical path (chains, slack, weekends, finished blockers, cycles), baselines (admin only, slip in days, limits), portfolio health and tenant isolation, scheduler (time zones, each occasion fires once, conditions checked first, weekly schedules, paused while read-only, lease), whiteboards (versions and conflicts, arrows and branches removed with their items, note → task, mind-map branch → task with subtasks).
 - **Units:** midpoint maths, prompt-injection fencing, AI fallback, keyword triage, and the client reducer ignoring stale packets.
 
 ---

@@ -32,6 +32,7 @@ type Draft = Omit<Rule, "id" | "runCount" | "lastRunAt">;
 type Tag = { id: string; name: string; color: string };
 
 const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
 const TYPES = ["epic", "story", "task", "bug"] as const;
 
 /* ------------------------------ sentence summary ------------------------------ */
@@ -44,9 +45,12 @@ function describe(ctx: BoardCtx, tags: Tag[], d: Draft) {
     t.kind === "task_created" ? "a task is created"
       : t.kind === "status_changed" ? `status changes to ${col(t.toColumnId)}`
         : t.kind === "assignee_changed" ? "the assignee changes"
-          : `priority changes to ${t.to ?? "anything"}`;
+          : t.kind === "priority_changed" ? `priority changes to ${t.to ?? "anything"}`
+            : t.kind === "due_soon" ? (t.days === 0 ? "a task is due today" : `a task is due within ${t.days} day${t.days === 1 ? "" : "s"}`)
+              : t.kind === "overdue" ? "a task becomes overdue"
+                : `every ${t.every === "week" ? WEEKDAYS[t.weekday ?? 0] : t.every === "weekday" ? "weekday" : "day"} at ${String(t.hour).padStart(2, "0")}:00 (${t.timezone}), for each open task`;
   const cond = d.conditions.map((c) => {
-    const v = c.field === "assignee" ? person(c.value) : c.field === "tag" ? (tags.find((x) => x.id === c.value)?.name ?? "a tag") : c.field === "team" ? (c.value ? (ctx.teams.find((t) => t.id === c.value)?.name ?? "a deleted group") : "no group") : c.value;
+    const v = c.field === "assignee" ? person(c.value) : c.field === "tag" ? (tags.find((x) => x.id === c.value)?.name ?? "a tag") : c.field === "team" ? (c.value ? (ctx.teams.find((t) => t.id === c.value)?.name ?? "a deleted group") : "no group") : c.field === "status" ? col(c.value) : c.value;
     return `${c.field} ${c.op === "is" ? (c.field === "tag" ? "includes" : "is") : c.field === "tag" ? "doesn't include" : "isn't"} ${v}`;
   });
   const then = d.actions.map((a) => {
@@ -274,14 +278,49 @@ function Editor({ ctx, tags, initial, onCancel, onSaved }: { ctx: BoardCtx; tags
             value={d.trigger.kind}
             onChange={(e) => {
               const k = e.target.value as AutomationTrigger["kind"];
-              set({ trigger: k === "status_changed" ? { kind: k, toColumnId: null } : k === "priority_changed" ? { kind: k, to: null } : { kind: k } });
+              set({
+                trigger:
+                  k === "status_changed" ? { kind: k, toColumnId: null }
+                    : k === "priority_changed" ? { kind: k, to: null }
+                      : k === "due_soon" ? { kind: k, days: 1 }
+                        : k === "schedule" ? { kind: k, every: "weekday", hour: 9, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" }
+                          : { kind: k },
+                // A scheduled rule has no "person who made the change".
+                actions: k === "due_soon" || k === "overdue" || k === "schedule" ? d.actions.filter((a) => !(a.type === "set_assignee" && a.userId === "actor")) : d.actions,
+              });
             }}
           >
             <option value="task_created">A task is created</option>
             <option value="status_changed">Status changes</option>
             <option value="assignee_changed">Assignee changes</option>
             <option value="priority_changed">Priority changes</option>
+            <option value="due_soon">A due date is coming up</option>
+            <option value="overdue">A task becomes overdue</option>
+            <option value="schedule">On a schedule</option>
           </Select>
+          {d.trigger.kind === "due_soon" && (
+            <Select aria-label="Days before due" value={d.trigger.days} onChange={(e) => set({ trigger: { kind: "due_soon", days: Number(e.target.value) } })}>
+              {[0, 1, 2, 3, 5, 7, 14].map((n) => <option key={n} value={n}>{n === 0 ? "on the due date" : `${n} day${n === 1 ? "" : "s"} before`}</option>)}
+            </Select>
+          )}
+          {d.trigger.kind === "schedule" && (() => {
+            const t = d.trigger;
+            return (
+              <div className="grid grid-cols-2 gap-2 sm:col-span-2">
+                <Select aria-label="How often" value={t.every === "week" ? `w${t.weekday ?? 0}` : t.every} onChange={(e) => {
+                  const v = e.target.value;
+                  set({ trigger: v.startsWith("w") && v !== "weekday" ? { ...t, every: "week", weekday: Number(v.slice(1)) } : { ...t, every: v as "day" | "weekday", weekday: undefined } });
+                }}>
+                  <option value="day">Every day</option>
+                  <option value="weekday">Every weekday</option>
+                  {WEEKDAYS.map((w, i) => <option key={w} value={`w${i}`}>Every {w}</option>)}
+                </Select>
+                <Select aria-label="Time" value={t.hour} onChange={(e) => set({ trigger: { ...t, hour: Number(e.target.value) } })}>
+                  {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00 ({t.timezone})</option>)}
+                </Select>
+              </div>
+            );
+          })()}
           {d.trigger.kind === "status_changed" && (
             <Select aria-label="To status" value={d.trigger.toColumnId ?? ""} onChange={(e) => set({ trigger: { kind: "status_changed", toColumnId: e.target.value || null } })}>
               <option value="">to any status</option>
@@ -307,6 +346,7 @@ function Editor({ ctx, tags, initial, onCancel, onSaved }: { ctx: BoardCtx; tags
                 <option value="assignee">Assignee</option>
                 <option value="tag">Tag</option>
                 <option value="team">Group</option>
+                <option value="status">Status</option>
               </Select>
               <Select aria-label="Operator" value={c.op} onChange={(e) => set({ conditions: d.conditions.map((x, j) => (j === i ? { ...x, op: e.target.value as never } : x)) })}>
                 <option value="is">{c.field === "tag" ? "includes" : "is"}</option>
@@ -318,6 +358,7 @@ function Editor({ ctx, tags, initial, onCancel, onSaved }: { ctx: BoardCtx; tags
                 {c.field === "assignee" && <><option value="">Unassigned</option>{people}</>}
                 {c.field === "tag" && <><option value="">Choose…</option>{tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</>}
                 {c.field === "team" && <><option value="">No group</option>{ctx.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</>}
+                {c.field === "status" && <><option value="">Choose…</option>{ctx.columns.map((col) => <option key={col.id} value={col.id}>{col.title}</option>)}</>}
               </Select>
               <RemoveBtn onClick={() => set({ conditions: d.conditions.filter((_, j) => j !== i) })} />
             </div>

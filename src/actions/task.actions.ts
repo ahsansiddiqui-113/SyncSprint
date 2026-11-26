@@ -15,6 +15,8 @@ import { alertManagers, pingInboxes } from "@/server/inbox-broadcast";
 import { publishEffects, publishTaskUpdate } from "@/server/after-task-change";
 import { publishEvent, publishTask, toPublicTasks } from "@/server/public-events";
 import { newEffects } from "@/server/services/task-effects";
+import { after } from "next/server";
+import { kickScheduler } from "@/server/scheduler-runner";
 
 /**
  * Advisory only: the change is already saved. Computed for everyone assigned to
@@ -135,6 +137,8 @@ export async function getBoardSnapshotAction(organizationId: string, projectId: 
       .select()
       .from(tasks)
       .where(and(eq(tasks.organizationId, organizationId), eq(tasks.projectId, projectId)));
+    // Serverless hosts have no always-on timer: active users' sync nudges the scheduler (throttled).
+    after(() => kickScheduler());
     return { tasks: rows.map(toTaskDTO) };
   });
 }

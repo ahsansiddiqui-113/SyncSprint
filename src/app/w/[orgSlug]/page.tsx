@@ -5,6 +5,7 @@ import { can } from "@/lib/rbac";
 import { loadWorkspace, orNotFound } from "@/server/page-guards";
 import { listProjects } from "@/server/services/workspace";
 import { Card, PageHeader } from "@/components/ui/card";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { CreateProjectForm } from "@/components/workspace/create-project-form";
 
 const GRADIENTS = ["from-violet-500/30 to-indigo-500/5", "from-sky-500/30 to-cyan-500/5", "from-emerald-500/30 to-teal-500/5", "from-amber-500/30 to-orange-500/5"];
@@ -16,7 +17,7 @@ export default async function ProjectsPage({ params }: { params: Promise<{ orgSl
 
   return (
     <main className="w-full px-10 py-10 2xl:px-14">
-      <PageHeader eyebrow={org.name} title="Projects" description="Each project has its own board, task numbering and real-time activity." />
+      <PageHeader eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Projects" }]} />} title="Projects" description="Each project has its own board, task numbering and real-time activity." />
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {projects.map((p, i) => (
           <Link key={p.id} href={`/w/${org.slug}/projects/${p.key}`} className="group">
