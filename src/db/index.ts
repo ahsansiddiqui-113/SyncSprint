@@ -25,7 +25,8 @@ export function createDb(url: string): DB {
     closers.add(() => client.close());
     return drizzlePglite(client, { schema }) as unknown as DB;
   }
-  const client = postgres(url, { max: 10, prepare: false });
+  // Serverless instances are many and short-lived: keep each pool small (Neon pools upstream).
+  const client = postgres(url, { max: process.env.VERCEL ? 3 : 10, prepare: false });
   closers.add(() => client.end({ timeout: 5 }));
   return drizzlePostgres(client, { schema }) as unknown as DB;
 }
@@ -44,6 +45,9 @@ export async function closeDb() {
 const g = globalThis as unknown as { __syncsprintDb?: DB };
 
 function getDb(): DB {
+  if (process.env.VERCEL && !process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is not set. Add a Postgres database (e.g. Neon) to this Vercel project.");
+  }
   return (g.__syncsprintDb ??= createDb(process.env.DATABASE_URL ?? "pglite://./.pglite"));
 }
 

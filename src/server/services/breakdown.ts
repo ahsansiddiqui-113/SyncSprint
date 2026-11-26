@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB, DbOrTx } from "@/db";
-import { auditLogs, checklistItems, customFields, tags, taskAssignees, taskDependencies, taskFieldValues, taskTags, taskWatchers, tasks, type SelectOption } from "@/db/schema";
+import { auditLogs, checklistItems, customFields, tags, taskAssignees, taskDependencies, taskFieldValues, taskTags, taskWatchers, taskRecurrences, tasks, type SelectOption, type RecurrenceFrequency } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { POSITION_STEP } from "@/lib/fractional-index";
 import { requireOrgPermission } from "@/lib/rbac";
@@ -34,6 +34,8 @@ export type ProjectMeta = {
   fieldValues: Record<string, Record<string, string | number>>;
   coAssignees: Record<string, string[]>;
   watchers: Record<string, string[]>;
+  /** Repeat rules by task id. */
+  recurrences: Record<string, { frequency: RecurrenceFrequency; interval: number }>;
 };
 
 /** Everything the views need to decorate cards, in four bounded queries. */
@@ -41,7 +43,7 @@ export async function getProjectMeta(conn: DB, actorId: string, organizationId: 
   await requireOrgPermission(actorId, organizationId, "viewer", conn);
   const inProject = and(eq(tasks.organizationId, organizationId), eq(tasks.projectId, projectId));
 
-  const [checks, tagLinks, orgTags, deps, fieldRows, valueRows, coRows, watchRows] = await Promise.all([
+  const [checks, tagLinks, orgTags, deps, fieldRows, valueRows, coRows, watchRows, repeatRows] = await Promise.all([
     conn
       .select({
         taskId: checklistItems.taskId,
@@ -87,6 +89,11 @@ export async function getProjectMeta(conn: DB, actorId: string, organizationId: 
       .from(taskWatchers)
       .innerJoin(tasks, eq(tasks.id, taskWatchers.taskId))
       .where(and(eq(taskWatchers.organizationId, organizationId), inProject)),
+    conn
+      .select({ taskId: taskRecurrences.taskId, frequency: taskRecurrences.frequency, interval: taskRecurrences.interval })
+      .from(taskRecurrences)
+      .innerJoin(tasks, eq(tasks.id, taskRecurrences.taskId))
+      .where(and(eq(taskRecurrences.organizationId, organizationId), inProject)),
   ]);
   const fieldValues: Record<string, Record<string, string | number>> = {};
   for (const v of valueRows) (fieldValues[v.taskId] ??= {})[v.fieldId] = v.value;
@@ -106,6 +113,7 @@ export async function getProjectMeta(conn: DB, actorId: string, organizationId: 
     fieldValues,
     coAssignees,
     watchers,
+    recurrences: Object.fromEntries(repeatRows.map((r) => [r.taskId, { frequency: r.frequency, interval: r.interval }])),
   };
 }
 

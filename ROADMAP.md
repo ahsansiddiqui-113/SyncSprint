@@ -56,17 +56,29 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
   - **warnings never block**: assignee pickers show this week's load, forms show a heads-up before saving, and saves return a warning naming the day and the overage
   - **Workload view**: people × days grid with load vs capacity, task breakdown per cell, unestimated / undated counts
 
-## Phase 5 — Collaboration & productivity
-- ⬜ @mentions + in-app notifications inbox
-- ⬜ Time tracking (start/stop timer, estimates vs actuals)
-- ⬜ File attachments
-- ⬜ Docs / wiki pages linked to tasks
-- ⬜ Goals / OKRs with progress from linked tasks
+## Phase 5 — Collaboration & productivity ✅
+- ✅ **Inbox**: notifications for @mentions, assignments (incl. co-assignees), comments on tasks you own or watch, and tasks reaching Done. Never notifies the person who acted; one notification per person per event (a mention beats a plain comment); only current members of the workspace receive anything. Unread badge in the sidebar, live toast, mark one/all read, filters
+- ✅ **Workload alerts**: when an assignment pushes someone over capacity, owners and admins are notified, at most once per person per day (database-enforced dedupe). The assignment itself is still never blocked
+- ✅ **@mentions**: type @ in a comment to pick a teammate; mentions are highlighted (yours stand out)
+- ✅ **Time tracking**: start/stop timer (one running timer per person, enforced by a partial unique index; starting another stops the first), manual entries ("1h 30m", "45m", "1:15"), tracked vs estimate bar, running timer pill in the sidebar. Only the author or an admin deletes an entry
+- ✅ **Attachments**: up to 4 MB per file, 200 MB per workspace, stored in Postgres so they work on serverless hosts. Membership checked on every download; only raster images render inline, everything else is forced to download with `nosniff` and a sandbox CSP
+- ✅ **Docs**: markdown wiki pages (tables, checklists, code) rendered without raw HTML; live preview, autosave, and conflict-safe saving (a second writer gets a choice instead of overwriting); link pages to tasks, shown in the task drawer
+- ✅ **Goals / OKRs**: key results measured by a number (supports decreasing targets, e.g. latency) or by linked tasks finished; goal progress is the average of its key results. Admins set goals, members check in values and link work
+- ✅ `?task=` links open a task's drawer directly (used by notifications, docs and goals)
 
-## Phase 6 — Automation & scale
-- ⬜ Automations ("when status changes to Done → notify / assign / move")
-- ⬜ Recurring tasks
-- ⬜ Workload view (capacity per person per week)
-- ⬜ Mind map / whiteboard view
-- ⬜ Public API + webhooks, import from CSV/Jira
-- ⬜ Horizontal scaling of real-time (Redis / Postgres LISTEN-NOTIFY)
+## Phase 6 — Automation & scale ✅
+- ✅ **Automations** per project: *when* a task is created / its status, assignee or priority changes, *if* priority / type / assignee / tag match, *then* move, assign (including "whoever made the change"), set priority, tag, set a due date, comment or notify. Plain-English summaries, templates, on/off switch, run history
+  - run inside the same transaction as the change; an automation's own changes never trigger other automations (no loops); a rule whose status/person/tag was deleted records a failed run and the person's change still saves
+  - automation comments are labelled with the rule, not a person
+- ✅ **Recurring tasks** (daily, weekdays, weekly, monthly, every N): finishing one creates the next with dates moved forward (start keeps its distance to due, monthly clamps to month end, late completions skip ahead), carrying over people, tags and an unchecked checklist. The rule moves to the new task, so re-completing never duplicates
+- ✅ **Sprint capacity** (Azure Boards style): hours each person has in the sprint (schedule − time off − holidays) vs open estimated work assigned to them, split between co-assignees; unassigned work called out; over-commitment flagged, never blocked
+- ✅ **CSV export and import**, Jira-compatible: maps Summary / Issue Type / Status / Priority / Assignee (email or name) / Labels (repeated columns) / Story Points / Original Estimate (seconds) / dates (ISO or Jira format) / Parent; preview with per-row warnings before anything is created; one transaction; formula-injection-safe export; round-trips with our own export
+- ✅ **REST API** `/api/v1`: personal API keys (hashed, shown once, read or read & write, act as their creator and lose access when the creator does), 120 req/min per key, consistent JSON errors, tasks by id or `ENG-12`, status by name, `expectedVersion` for safe concurrent updates. Same services as the app, so RBAC, OCC, audit, automations and realtime all apply
+- ✅ **Webhooks**: `task.created`, `task.updated`, `task.deleted`, `comment.created`, signed with HMAC-SHA256 (`SyncSprint-Signature: t=…,v1=…`), delivered after the response (Next `after`), https + public addresses only (checked after DNS, again at delivery), no redirects, 5 s timeout, delivery log, test button, auto-off after 15 failures
+- ✅ **Horizontal realtime**: optional Postgres `LISTEN/NOTIFY` fan-out (`REALTIME_FANOUT=postgres`) so several app servers share live updates; oversized task events are re-read from the database by receivers
+
+## Phase 7 — Visual planning (next)
+- ⬜ Whiteboard / mind map view
+- ⬜ Gantt baselines and critical path
+- ⬜ Portfolio view across projects
+- ⬜ Scheduled automations (e.g. "every Monday", "2 days before due")

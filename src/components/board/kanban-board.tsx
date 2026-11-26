@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarDays, ChartGantt, ChevronRight, Eye, Gauge, Kanban, LayoutDashboard, List as ListIcon, Plus, Rocket, Settings2, Shuffle, Sparkles, Table2 } from "lucide-react";
+import { ArrowDownUp, CalendarDays, ChartGantt, ChevronRight, Eye, Gauge, Kanban, LayoutDashboard, List as ListIcon, MoreHorizontal, Plus, Rocket, Settings2, Shuffle, Sparkles, Table2, Zap } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import type { OrgEvent, PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
 import { can } from "@/lib/rbac-shared";
@@ -36,6 +36,9 @@ import { SprintsView } from "./views/sprints-view";
 import { TableView, type SortState, type WeekLoad } from "./views/table-view";
 import { WorkloadView } from "./views/workload-view";
 import { CustomizePanel } from "./customize-panel";
+import { AutomationsPanel } from "./automations-panel";
+import { ImportExportPanel } from "./import-export-panel";
+import { Popover } from "@/components/ui/popover";
 import { ViewsMenu, type GroupBy } from "./views-menu";
 import { showCapacityWarnings } from "./capacity-warnings";
 import { getWorkloadAction } from "@/actions/capacity.actions";
@@ -82,6 +85,15 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   });
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  // Deep links from notifications / docs / goals: ?task=<id> opens the drawer once.
+  const linkedTaskId = searchParams.get("task");
+  useEffect(() => {
+    if (!linkedTaskId) return;
+    setOpenTaskId(linkedTaskId);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("task");
+    window.history.replaceState(null, "", url);
+  }, [linkedTaskId]);
   const [editing, setEditing] = useState(false);
   const [flash, setFlash] = useState<Record<string, true>>({});
   const [commentsVersion, setCommentsVersion] = useState(0);
@@ -94,6 +106,8 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const [sort, setSort] = useState<SortState>(null);
   const [groupBy, setGroupBy] = useState<GroupBy>("status");
   const [showCustomize, setShowCustomize] = useState(false);
+  const [showAutomations, setShowAutomations] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   /** Bumped on anything that changes workload (task edits, co-assignees, capacity settings). */
   const [workloadKey, setWorkloadKey] = useState(0);
   const [weekLoad, setWeekLoad] = useState<WeekLoad>(new Map());
@@ -172,9 +186,19 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     setTimeout(() => setFlash(({ [id]: _, ...rest }) => rest), 1600);
   };
 
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const resync = useCallback(async () => {
     const res = await getBoardSnapshotAction(org.id, project.id);
-    if (res.ok) dispatch({ type: "reset", tasks: res.tasks });
+    if (res.ok) {
+      // Highlight work changed by someone else since the last sync (polling mode has no events).
+      const before = stateRef.current.tasks;
+      for (const t of res.tasks) {
+        const prev = before[t.id];
+        if (prev && t.version > prev.version && !ownWrites.current.has(`${t.id}:${t.version}`)) flashTask(t.id);
+      }
+      dispatch({ type: "sync", tasks: res.tasks });
+    }
     loadMeta();
     void loadSprints();
   }, [org.id, project.id, loadMeta, loadSprints]);
@@ -268,7 +292,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   async function commitMove(task: TaskDTO, columnId: string, position: number) {
     dispatch({ type: "optimisticMove", taskId: task.id, columnId, position });
     ownWrites.current.add(`${task.id}:${task.version + 1}`);
-    const res = await moveTaskAction({ organizationId: org.id, taskId: task.id, targetColumnId: columnId, newPosition: position, expectedVersion: task.version });
+    const res = await moveTaskAction({ organizationId: org.id, taskId: task.id, targetColumnId: columnId, newPosition: position, expectedVersion: task.version }, todayISO());
     if (!res.ok) {
       dispatch({ type: "force", task });
       toast.error(res.code.startsWith("FORBIDDEN") ? "Your role doesn't allow moving tasks." : res.message);
@@ -398,6 +422,21 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
                 <Settings2 className="h-4 w-4" /> Customize
               </Button>
             )}
+            <Button variant="outline" size="sm" onClick={() => setShowAutomations(true)} title="When something happens, do the busywork automatically">
+              <Zap className="h-4 w-4" /> Automate
+            </Button>
+            <Popover
+              align="right"
+              trigger={() => (
+                <Button variant="outline" size="sm" aria-label="More project actions">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              )}
+            >
+              <button onClick={() => setShowImport(true)} className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[15px] hover:bg-hover">
+                <ArrowDownUp className="h-4 w-4 text-subtle" /> Import & export CSV
+              </button>
+            </Popover>
             <Button variant="ai" size="sm" onClick={() => setShowDigest(true)}>
               <Sparkles className="h-4 w-4" /> AI standup
             </Button>
@@ -556,6 +595,21 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
         />
       )}
       {showDigest && <DigestPanel ctx={ctx} onClose={() => setShowDigest(false)} />}
+      {showAutomations && <AutomationsPanel ctx={ctx} tags={meta.tags} onClose={() => setShowAutomations(false)} />}
+      {showImport && (
+        <ImportExportPanel
+          ctx={ctx}
+          onClose={() => setShowImport(false)}
+          onImported={(ts) => {
+            for (const t of ts) {
+              ownWrites.current.add(`${t.id}:${t.version}`);
+              dispatch({ type: "server", task: t });
+            }
+            loadMeta();
+            router.refresh();
+          }}
+        />
+      )}
       {showCustomize && (
         <CustomizePanel
           organizationId={org.id}
@@ -592,20 +646,20 @@ function Progress({ done, total }: { done: number; total: number }) {
 }
 
 function LiveDot({ status }: { status: ConnectionStatus }) {
-  const live = status === "live";
+  const live = status === "live" || status === "sync";
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12.5px] font-semibold",
         live ? "bg-emerald-50 text-emerald-700" : "bg-surface-2 text-muted"
       )}
-      title={live ? "Connected to the org's real-time room" : "Reconnecting…"}
+      title={status === "sync" ? "Changes from teammates sync every few seconds" : live ? "Connected — changes appear instantly" : "Reconnecting…"}
     >
       <span className="relative flex h-2 w-2">
         {live && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" />}
         <span className={cn("relative inline-flex h-2 w-2 rounded-full", live ? "bg-emerald-500" : "bg-zinc-400")} />
       </span>
-      {live ? "Live" : status === "connecting" ? "Connecting" : "Offline"}
+      {status === "sync" ? "Auto-sync" : live ? "Live" : status === "connecting" ? "Connecting" : "Offline"}
     </span>
   );
 }

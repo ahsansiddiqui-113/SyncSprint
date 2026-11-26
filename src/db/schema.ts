@@ -14,6 +14,7 @@ import {
   uniqueIndex,
   primaryKey,
   check,
+  customType,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -24,6 +25,16 @@ export const inviteStatusEnum = pgEnum("invite_status", ["pending", "accepted", 
 export const sprintStatusEnum = pgEnum("sprint_status", ["planned", "active", "completed"]);
 export const customFieldTypeEnum = pgEnum("custom_field_type", ["text", "number", "select", "date", "person"]);
 export const timeOffKindEnum = pgEnum("time_off_kind", ["vacation", "sick", "holiday", "other"]);
+export const notificationKindEnum = pgEnum("notification_kind", ["mention", "assigned", "comment", "completed", "capacity", "automation"]);
+export const keyResultKindEnum = pgEnum("key_result_kind", ["number", "tasks"]);
+export const recurrenceFrequencyEnum = pgEnum("recurrence_frequency", ["daily", "weekdays", "weekly", "monthly"]);
+export const apiKeyScopeEnum = pgEnum("api_key_scope", ["read", "write"]);
+
+/** Postgres bytea for small attachments (kept in the database so serverless hosts need no extra storage). */
+const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
+  dataType: () => "bytea",
+  fromDriver: (v) => (Buffer.isBuffer(v) ? v : Buffer.from(v)),
+});
 /** Work item types (Azure Boards / Jira style). Hierarchy uses parentId (one level). */
 export const workItemTypeEnum = pgEnum("work_item_type", ["epic", "story", "task", "bug"]);
 
@@ -523,6 +534,316 @@ export const savedViews = pgTable(
   (t) => [index("saved_views_project_idx").on(t.organizationId, t.projectId)]
 );
 
+// 7i. Notifications (in-app inbox)
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    kind: notificationKindEnum("kind").notNull(),
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 200 }).notNull(),
+    body: varchar("body", { length: 300 }),
+    /** Where clicking the notification goes (app-relative path). */
+    link: varchar("link", { length: 300 }),
+    /** Optional dedupe key, e.g. one capacity alert per person per day. */
+    dedupeKey: varchar("dedupe_key", { length: 120 }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    index("notifications_inbox_idx").on(t.organizationId, t.userId, t.createdAt),
+    uniqueIndex("notifications_dedupe_idx").on(t.userId, t.dedupeKey),
+  ]
+);
+
+// 7j. Time tracking: one running timer per person (endedAt null)
+export const timeEntries = pgTable(
+  "time_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** Duration in minutes (set when stopped or for manual entries). */
+    minutes: integer("minutes"),
+    note: varchar("note", { length: 200 }),
+    manual: boolean("manual").default(false).notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    index("time_entries_task_idx").on(t.organizationId, t.taskId),
+    index("time_entries_user_idx").on(t.organizationId, t.userId, t.startedAt),
+    uniqueIndex("time_entries_one_running_idx").on(t.userId).where(sql`${t.endedAt} is null`),
+    check("time_entries_minutes_range", sql`${t.minutes} is null or (${t.minutes} >= 0 and ${t.minutes} <= 1440)`),
+  ]
+);
+
+// 7k. Attachments (stored in Postgres; small files only)
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    uploadedById: uuid("uploaded_by_id").references(() => users.id, { onDelete: "set null" }),
+    filename: varchar("filename", { length: 200 }).notNull(),
+    contentType: varchar("content_type", { length: 120 }).notNull(),
+    size: integer("size").notNull(),
+    data: bytea("data").notNull(),
+    ...timestamps,
+  },
+  (t) => [index("attachments_task_idx").on(t.organizationId, t.taskId)]
+);
+
+// 7l. Docs (wiki pages, markdown) linked to tasks
+export const docs = pgTable(
+  "docs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 160 }).notNull(),
+    content: text("content").default("").notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    version: integer("version").default(1).notNull(),
+    ...timestamps,
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("docs_org_updated_idx").on(t.organizationId, t.updatedAt)]
+);
+
+export const docTasks = pgTable(
+  "doc_tasks",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    docId: uuid("doc_id")
+      .notNull()
+      .references(() => docs.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.docId, t.taskId] }), index("doc_tasks_task_idx").on(t.organizationId, t.taskId)]
+);
+
+// 7m. Goals (OKRs): key results are numeric targets or progress of linked tasks
+export const goals = pgTable(
+  "goals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 160 }).notNull(),
+    description: text("description"),
+    ownerId: uuid("owner_id").references(() => users.id, { onDelete: "set null" }),
+    dueDate: date("due_date", { mode: "string" }),
+    ...timestamps,
+  },
+  (t) => [index("goals_org_idx").on(t.organizationId)]
+);
+
+export const keyResults = pgTable(
+  "key_results",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    goalId: uuid("goal_id")
+      .notNull()
+      .references(() => goals.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 160 }).notNull(),
+    kind: keyResultKindEnum("kind").notNull(),
+    startValue: doublePrecision("start_value").default(0).notNull(),
+    targetValue: doublePrecision("target_value").default(100).notNull(),
+    currentValue: doublePrecision("current_value").default(0).notNull(),
+    unit: varchar("unit", { length: 20 }),
+    position: doublePrecision("position").notNull(),
+  },
+  (t) => [index("key_results_goal_idx").on(t.organizationId, t.goalId)]
+);
+
+export const keyResultTasks = pgTable(
+  "key_result_tasks",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    keyResultId: uuid("key_result_id")
+      .notNull()
+      .references(() => keyResults.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.keyResultId, t.taskId] }), index("kr_tasks_task_idx").on(t.organizationId, t.taskId)]
+);
+
+// 7n. Automations: "when <trigger> and <conditions> then <actions>", per project
+export type AutomationTrigger =
+  | { kind: "task_created" }
+  | { kind: "status_changed"; toColumnId: string | null }
+  | { kind: "assignee_changed" }
+  | { kind: "priority_changed"; to: "low" | "medium" | "high" | "urgent" | null };
+export type AutomationCondition = { field: "priority" | "type" | "assignee" | "tag"; op: "is" | "is_not"; value: string | null };
+export type AutomationAction =
+  | { type: "move_to_status"; columnId: string }
+  | { type: "set_assignee"; userId: string | "actor" | null }
+  | { type: "set_priority"; priority: "low" | "medium" | "high" | "urgent" }
+  | { type: "add_tag"; tagId: string }
+  | { type: "set_due_in_days"; days: number }
+  | { type: "add_comment"; body: string }
+  | { type: "notify"; target: "assignee" | "watchers" | "user"; userId?: string | null; message: string };
+
+export const automations = pgTable(
+  "automations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    trigger: jsonb("trigger").$type<AutomationTrigger>().notNull(),
+    conditions: jsonb("conditions").$type<AutomationCondition[]>().default([]).notNull(),
+    actions: jsonb("actions").$type<AutomationAction[]>().notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    runCount: integer("run_count").default(0).notNull(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index("automations_project_idx").on(t.organizationId, t.projectId)]
+);
+
+export const automationRuns = pgTable(
+  "automation_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    ok: boolean("ok").notNull(),
+    detail: varchar("detail", { length: 300 }).notNull(),
+    ...timestamps,
+  },
+  (t) => [index("automation_runs_idx").on(t.automationId, t.createdAt)]
+);
+
+// 7o. Recurring tasks: when the task reaches Done, the next occurrence is created and the rule moves to it
+export const taskRecurrences = pgTable(
+  "task_recurrences",
+  {
+    taskId: uuid("task_id")
+      .primaryKey()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    frequency: recurrenceFrequencyEnum("frequency").notNull(),
+    interval: integer("interval").default(1).notNull(),
+    /** How many occurrences have been created so far (for "3rd time" context). */
+    occurrences: integer("occurrences").default(0).notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [check("task_recurrences_interval", sql`${t.interval} between 1 and 12`)]
+);
+
+// 7p. Public API keys (hashed; the token is shown once) and outgoing webhooks
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** The key acts as this person, capped at its scope. */
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 80 }).notNull(),
+    prefix: varchar("prefix", { length: 16 }).notNull(),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    scope: apiKeyScopeEnum("scope").notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("api_keys_hash_idx").on(t.tokenHash), index("api_keys_org_idx").on(t.organizationId)]
+);
+
+export const webhooks = pgTable(
+  "webhooks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    url: varchar("url", { length: 500 }).notNull(),
+    /** Shared signing secret (HMAC-SHA256); needed in clear to sign, like Stripe/GitHub. */
+    secret: varchar("secret", { length: 80 }).notNull(),
+    events: jsonb("events").$type<string[]>().notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
+    lastStatus: integer("last_status"),
+    lastDeliveryAt: timestamp("last_delivery_at", { withTimezone: true }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [index("webhooks_org_idx").on(t.organizationId)]
+);
+
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    webhookId: uuid("webhook_id")
+      .notNull()
+      .references(() => webhooks.id, { onDelete: "cascade" }),
+    event: varchar("event", { length: 60 }).notNull(),
+    statusCode: integer("status_code"),
+    ok: boolean("ok").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    error: varchar("error", { length: 300 }),
+    ...timestamps,
+  },
+  (t) => [index("webhook_deliveries_idx").on(t.webhookId, t.createdAt)]
+);
+
 // 8. Task comments
 export const taskComments = pgTable(
   "task_comments",
@@ -535,6 +856,8 @@ export const taskComments = pgTable(
       .notNull()
       .references(() => tasks.id, { onDelete: "cascade" }),
     authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
+    /** Set when an automation wrote the comment (shown as the automation, not a person). */
+    automationId: uuid("automation_id").references((): AnyPgColumn => automations.id, { onDelete: "set null" }),
     body: text("body").notNull(),
     ...timestamps,
   },
@@ -594,3 +917,13 @@ export type CustomFieldType = (typeof customFieldTypeEnum.enumValues)[number];
 export type SavedView = typeof savedViews.$inferSelect;
 export type TimeOff = typeof timeOff.$inferSelect;
 export type TimeOffKind = (typeof timeOffKindEnum.enumValues)[number];
+export type Notification = typeof notifications.$inferSelect;
+export type NotificationKind = (typeof notificationKindEnum.enumValues)[number];
+export type TimeEntry = typeof timeEntries.$inferSelect;
+export type Doc = typeof docs.$inferSelect;
+export type Goal = typeof goals.$inferSelect;
+export type KeyResult = typeof keyResults.$inferSelect;
+export type Automation = typeof automations.$inferSelect;
+export type RecurrenceFrequency = (typeof recurrenceFrequencyEnum.enumValues)[number];
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type Webhook = typeof webhooks.$inferSelect;

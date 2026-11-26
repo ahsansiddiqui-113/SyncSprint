@@ -10,7 +10,9 @@ export type BoardAction =
   | { type: "remove"; taskId: string }
   | { type: "optimisticMove"; taskId: string; columnId: string; position: number }
   | { type: "rebalance"; positions: Record<string, number> }
-  | { type: "reset"; tasks: TaskDTO[] };
+  | { type: "reset"; tasks: TaskDTO[] }
+  /** Merge an authoritative snapshot: newer versions win, tasks gone from the server are removed. */
+  | { type: "sync"; tasks: TaskDTO[] };
 
 export function initBoard(tasks: TaskDTO[]): BoardState {
   return { tasks: Object.fromEntries(tasks.map((t) => [t.id, t])) };
@@ -45,6 +47,14 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
     }
     case "reset":
       return initBoard(action.tasks);
+    case "sync": {
+      const next: Record<string, TaskDTO> = {};
+      for (const t of action.tasks) {
+        const local = state.tasks[t.id];
+        next[t.id] = local && local.version > t.version ? local : t;
+      }
+      return { tasks: next };
+    }
   }
 }
 

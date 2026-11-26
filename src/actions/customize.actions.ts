@@ -1,5 +1,6 @@
 "use server";
 
+import { alertManagers, pingInboxes } from "@/server/inbox-broadcast";
 import { db } from "@/db";
 import { toResult } from "@/lib/errors";
 import { requireActor } from "@/lib/session";
@@ -87,13 +88,15 @@ export async function setFieldValueAction(organizationId: string, taskId: string
 export async function setCoAssigneesAction(organizationId: string, taskId: string, userIds: string[], today?: string) {
   return toResult(async () => {
     const actor = await requireActor();
-    const { projectId, coAssignees } = await svc.setCoAssignees(db, actor.id, organizationId, taskId, userIds);
+    const { projectId, coAssignees, notified } = await svc.setCoAssignees(db, actor.id, organizationId, taskId, userIds);
+    pingInboxes(organizationId, notified);
     broadcastOrgEvent(organizationId, { type: "TASK_META_CHANGED", actor, projectId, taskIds: [taskId], kind: "people" });
     // Advisory capacity check for the newly assigned people (never blocks).
     const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
     const warnings = task && task.estimateHours && coAssignees.length
       ? await capacityWarnings(db, organizationId, [...(task.assigneeId ? [task.assigneeId] : []), ...coAssignees], task, today).catch(() => [])
       : [];
+    await alertManagers(organizationId, actor.id, taskId, warnings);
     return { warnings };
   });
 }

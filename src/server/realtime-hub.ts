@@ -82,10 +82,16 @@ class RealtimeHub {
   }
 }
 
-const g = globalThis as unknown as { __syncsprintHub?: RealtimeHub };
+const g = globalThis as unknown as { __syncsprintHub?: RealtimeHub; __syncsprintFanout?: { publish(o: string, e: OrgEvent): void } };
 export const hub: RealtimeHub = (g.__syncsprintHub ??= new RealtimeHub());
+
+/** Multi-instance deployments install a fan-out (see realtime-fanout.ts) at boot. */
+export function setFanout(f: { publish(o: string, e: OrgEvent): void } | undefined) {
+  g.__syncsprintFanout = f;
+}
 
 /** Called by server actions *after* the DB transaction commits. */
 export function broadcastOrgEvent(organizationId: string, event: OrgEvent) {
-  hub.publish(organizationId, event);
+  if (g.__syncsprintFanout) g.__syncsprintFanout.publish(organizationId, event);
+  else hub.publish(organizationId, event);
 }

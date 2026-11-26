@@ -16,9 +16,10 @@ export type TaskDecor = {
   /** Unfinished blockers per blocked task id. */
   openBlockers: Map<string, string[]>;
   deps: ProjectMeta["deps"];
+  recurrences: ProjectMeta["recurrences"];
 };
 
-export const EMPTY_META: ProjectMeta = { checklist: {}, tagsByTask: {}, tags: [], deps: [], fields: [], fieldValues: {}, coAssignees: {}, watchers: {} };
+export const EMPTY_META: ProjectMeta = { checklist: {}, tagsByTask: {}, tags: [], deps: [], fields: [], fieldValues: {}, coAssignees: {}, watchers: {}, recurrences: {} };
 
 export function buildDecor(tasks: Record<string, TaskDTO>, meta: ProjectMeta, doneColumnId: string | null): TaskDecor {
   const subtasks = new Map<string, { done: number; total: number }>();
@@ -45,5 +46,6 @@ export function buildDecor(tasks: Record<string, TaskDTO>, meta: ProjectMeta, do
     subtasks,
     openBlockers,
     deps: meta.deps,
+    recurrences: meta.recurrences ?? {},
   };
 }

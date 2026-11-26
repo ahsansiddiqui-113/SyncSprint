@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { DB, DbOrTx } from "@/db";
 import {
   auditLogs,
+  automations,
   boardColumns,
   orgMembers,
   projects,
@@ -15,6 +16,8 @@ import { AppError } from "@/lib/errors";
 import { MIN_GAP, POSITION_STEP, rebalancePositions } from "@/lib/fractional-index";
 import { requireOrgPermission } from "@/lib/rbac";
 import { assertAssignableSprint, recordSprintSnapshots } from "./sprints";
+import { notifyComment } from "./notifications";
+import { afterTaskChange, newEffects, type Effects } from "./task-effects";
 
 export const workItemTypeSchema = z.enum(["epic", "story", "task", "bug"]);
 
@@ -116,7 +119,7 @@ export const createTaskInput = z.object({
   sprintId: z.string().uuid().nullish(),
 });
 
-export async function createTask(conn: DB, actorId: string, raw: z.input<typeof createTaskInput>) {
+export async function createTask(conn: DB, actorId: string, raw: z.input<typeof createTaskInput>, fx: Effects = newEffects()) {
   const input = createTaskInput.parse(raw);
   await requireOrgPermission(actorId, input.organizationId, "member", conn);
   assertDateOrder(input.startDate, input.dueDate);
@@ -183,7 +186,7 @@ export async function createTask(conn: DB, actorId: string, raw: z.input<typeof 
       metadata: { ref: `${project.key}-${task!.taskNumber}`, title: task!.title, columnId: input.columnId, parentId: input.parentId ?? null },
     });
     await recordSprintSnapshots(tx, input.organizationId, [task!.sprintId]);
-    return task!;
+    return afterTaskChange(tx, input.organizationId, actorId, null, task!, fx);
   });
 }
 
@@ -199,14 +202,14 @@ export const moveTaskInput = z.object({
 
 export type ConflictResult = { ok: false; code: "VERSION_CONFLICT"; current: Task | null };
 export type MoveResult =
-  | { ok: true; task: Task; rebalanced: Record<string, number> | null }
+  | { ok: true; task: Task; rebalanced: Record<string, number> | null; notified: string[] }
   | ConflictResult;
 
 /**
  * Optimistic concurrency control: the UPDATE only matches when the row is still
  * at `expectedVersion`. Version bump + audit row commit atomically or not at all.
  */
-export async function moveTask(conn: DB, actorId: string, raw: z.input<typeof moveTaskInput>): Promise<MoveResult> {
+export async function moveTask(conn: DB, actorId: string, raw: z.input<typeof moveTaskInput>, fx: Effects = newEffects()): Promise<MoveResult> {
   const input = moveTaskInput.parse(raw);
   await requireOrgPermission(actorId, input.organizationId, "member", conn);
 
@@ -214,7 +217,7 @@ export async function moveTask(conn: DB, actorId: string, raw: z.input<typeof mo
     const targetCol = await assertColumnInOrg(tx, input.organizationId, input.targetColumnId);
 
     const [before] = await tx
-      .select({ columnId: tasks.columnId, projectId: tasks.projectId })
+      .select()
       .from(tasks)
       .where(and(eq(tasks.id, input.taskId), eq(tasks.organizationId, input.organizationId)))
       .limit(1);
@@ -268,7 +271,10 @@ export async function moveTask(conn: DB, actorId: string, raw: z.input<typeof mo
     });
 
     await recordSprintSnapshots(tx, input.organizationId, [updated.sprintId]);
-    return { ok: true as const, task: finalTask, rebalanced };
+
+    // Automations, completion notices and the next recurring occurrence.
+    const after = await afterTaskChange(tx, input.organizationId, actorId, before, finalTask, fx);
+    return { ok: true as const, task: after, rebalanced, notified: [...fx.notified] };
   });
 }
 
@@ -294,9 +300,9 @@ export const updateTaskInput = z.object({
     .partial(),
 });
 
-export type UpdateResult = { ok: true; task: Task; changes: string[] } | ConflictResult;
+export type UpdateResult = { ok: true; task: Task; changes: string[]; notified: string[] } | ConflictResult;
 
-export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof updateTaskInput>): Promise<UpdateResult> {
+export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof updateTaskInput>, fx: Effects = newEffects()): Promise<UpdateResult> {
   const input = updateTaskInput.parse(raw);
   await requireOrgPermission(actorId, input.organizationId, "member", conn);
 
@@ -346,7 +352,8 @@ export async function updateTask(conn: DB, actorId: string, raw: z.input<typeof 
     });
     // Points or sprint membership changes move burndown lines (old and new sprint).
     await recordSprintSnapshots(tx, input.organizationId, [before.sprintId, updated.sprintId]);
-    return { ok: true as const, task: updated, changes: Object.keys(changes) };
+    const after = await afterTaskChange(tx, input.organizationId, actorId, before, updated, fx);
+    return { ok: true as const, task: after, changes: Object.keys(changes), notified: [...fx.notified] };
   });
 }
 
@@ -397,7 +404,8 @@ export async function addComment(conn: DB, actorId: string, organizationId: stri
       entityId: taskId,
       metadata: { commentId: comment!.id, preview: text.slice(0, 120) },
     });
-    return comment!;
+    const notified = await notifyComment(tx, organizationId, actorId, taskId, text);
+    return { ...comment!, notified };
   });
 }
 
@@ -410,9 +418,12 @@ export async function listComments(conn: DB, actorId: string, organizationId: st
       createdAt: taskComments.createdAt,
       authorName: users.name,
       authorId: taskComments.authorId,
+      automationName: automations.name,
+      viaAutomation: sql<boolean>`${taskComments.automationId} is not null`,
     })
     .from(taskComments)
     .leftJoin(users, eq(users.id, taskComments.authorId))
+    .leftJoin(automations, eq(automations.id, taskComments.automationId))
     .where(and(eq(taskComments.organizationId, organizationId), eq(taskComments.taskId, taskId)))
     .orderBy(asc(taskComments.createdAt));
 }

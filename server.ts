@@ -5,6 +5,7 @@ import next from "next";
 import { closeDb, db } from "@/db";
 import { MIGRATIONS_FOLDER, runMigrations } from "@/db/migrate";
 import { createWsUpgradeHandler } from "@/server/ws-server";
+import { startPostgresFanout } from "@/server/realtime-postgres";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT ?? 3000);
@@ -12,6 +13,8 @@ const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? `http://localhost:${port}`;
 
 async function main() {
   await runMigrations(db);
+  // Several app servers behind a load balancer? Fan realtime events out through Postgres.
+  if (process.env.REALTIME_FANOUT === "postgres") await startPostgresFanout(process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL ?? "");
 
   const app = next({ dev, port });
   await app.prepare();

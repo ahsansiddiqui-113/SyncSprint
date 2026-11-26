@@ -18,6 +18,7 @@ import {
 import { AppError } from "@/lib/errors";
 import { POSITION_STEP } from "@/lib/fractional-index";
 import { requireOrgPermission } from "@/lib/rbac";
+import { notifyAssigned } from "./notifications";
 import { TAG_COLORS } from "@/lib/tag-colors";
 import { recordSprintSnapshots } from "./sprints";
 
@@ -314,10 +315,12 @@ export async function setCoAssignees(conn: DB, actorId: string, organizationId: 
     const wanted = ids.filter((id) => id !== task.assigneeId);
     const valid = await membersOf(tx, organizationId, wanted);
     if (valid.size !== wanted.length) throw new AppError("VALIDATION", "Everyone assigned must be in this workspace");
+    const previous = new Set((await tx.select({ userId: taskAssignees.userId }).from(taskAssignees).where(eq(taskAssignees.taskId, taskId))).map((r) => r.userId));
     await tx.delete(taskAssignees).where(eq(taskAssignees.taskId, taskId));
     if (wanted.length) await tx.insert(taskAssignees).values(wanted.map((userId) => ({ organizationId, taskId, userId })));
     await audit(tx, organizationId, actorId, "ASSIGNEES_UPDATED", "task", taskId, { coAssignees: wanted.length });
-    return { projectId: task.projectId, coAssignees: wanted };
+    const notified = await notifyAssigned(tx, organizationId, actorId, taskId, wanted.filter((u) => !previous.has(u)));
+    return { projectId: task.projectId, coAssignees: wanted, notified };
   });
 }
 

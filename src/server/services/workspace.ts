@@ -423,6 +423,14 @@ export const AUDIT_ACTIONS = [
   "SPRINT_CREATED",
   "SPRINT_STARTED",
   "SPRINT_COMPLETED",
+  "TIME_LOGGED",
+  "ATTACHMENT_ADDED",
+  "DOC_CREATED",
+  "DOC_UPDATED",
+  "GOAL_CREATED",
+  "KEY_RESULT_UPDATED",
+  "AUTOMATION_RAN",
+  "TASKS_IMPORTED",
 ] as const;
 
 export async function listAuditLogs(
