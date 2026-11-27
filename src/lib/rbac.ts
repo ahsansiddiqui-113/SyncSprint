@@ -4,6 +4,8 @@ import { orgMembers, organizations, users, type OrgRole, type Organization } fro
 import { AppError, type AppErrorCode } from "./errors";
 import { billingState, type BillingState } from "./billing-rules";
 import { isPlatformAdmin } from "./platform";
+import { ipAllowed } from "./ip";
+import { currentRequestIp } from "./request-ip";
 
 export type { OrgRole };
 
@@ -29,7 +31,29 @@ const billingCols = {
   suspendedAt: organizations.suspendedAt,
   createdAt: organizations.createdAt,
   supportAccessUntil: organizations.supportAccessUntil,
+  require2fa: organizations.require2fa,
+  ipAllowlist: organizations.ipAllowlist,
 };
+
+/**
+ * Workspace security policy, on top of role and billing:
+ *  - require2fa: the person must have two-step sign-in on
+ *  - ipAllowlist: the request must come from an allowed address (skipped outside a request,
+ *    e.g. the scheduler, where there is no caller)
+ * The demo workspace is exempt.
+ */
+export async function enforcePolicy(org: { isDemo: boolean; require2fa: boolean; ipAllowlist: string | null }, twoFactorEnabled: boolean) {
+  if (org.isDemo) return;
+  if (org.require2fa && !twoFactorEnabled) {
+    throw new AppError("TWO_FACTOR_REQUIRED", "This workspace requires two-step sign-in. Turn it on in your account settings.");
+  }
+  if (org.ipAllowlist?.trim()) {
+    const ip = await currentRequestIp();
+    if (ip !== undefined && !ipAllowed(ip, org.ipAllowlist)) {
+      throw new AppError("IP_NOT_ALLOWED", "This workspace can only be opened from approved networks.");
+    }
+  }
+}
 
 /**
  * Apply the billing access level on top of RBAC:
@@ -62,9 +86,10 @@ export async function requireOrgPermission(
   opts: GuardOptions = {}
 ): Promise<OrgRole> {
   const [row] = await conn
-    .select({ role: orgMembers.role, org: billingCols })
+    .select({ role: orgMembers.role, org: billingCols, twoFactorEnabled: users.twoFactorEnabled })
     .from(organizations)
     .leftJoin(orgMembers, and(eq(orgMembers.organizationId, organizations.id), eq(orgMembers.userId, userId)))
+    .leftJoin(users, eq(users.id, userId))
     .where(eq(organizations.id, organizationId))
     .limit(1);
 
@@ -73,6 +98,7 @@ export async function requireOrgPermission(
   if (!hasRole(role, requiredRole)) {
     throw new AppError(`FORBIDDEN_REQUIRES_${requiredRole === "owner" ? "ADMIN" : requiredRole.toUpperCase()}` as AppErrorCode);
   }
+  await enforcePolicy(row.org, !!row.twoFactorEnabled);
   enforceBilling(billingState(row.org), role, requiredRole, opts);
   return role;
 }
@@ -88,9 +114,10 @@ export async function requireOrgBySlug(
   conn: DbOrTx = defaultDb
 ): Promise<{ org: Organization; role: OrgRole; billing: BillingState; viaSupport: boolean }> {
   const [row] = await conn
-    .select({ org: organizations, role: orgMembers.role })
+    .select({ org: organizations, role: orgMembers.role, twoFactorEnabled: users.twoFactorEnabled })
     .from(organizations)
     .leftJoin(orgMembers, and(eq(orgMembers.organizationId, organizations.id), eq(orgMembers.userId, userId)))
+    .leftJoin(users, eq(users.id, userId))
     .where(eq(organizations.slug, slug))
     .limit(1);
 
@@ -101,5 +128,6 @@ export async function requireOrgBySlug(
   if (!hasRole(role, requiredRole)) {
     throw new AppError(`FORBIDDEN_REQUIRES_${requiredRole.toUpperCase()}` as AppErrorCode);
   }
+  await enforcePolicy(row.org, !!row.twoFactorEnabled);
   return { org: row.org, role, billing: billingState(row.org), viaSupport: !!support };
 }

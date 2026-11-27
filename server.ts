@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { watch } from "node:fs";
+import { watch, watchFile } from "node:fs";
 import { createServer } from "node:http";
 import next from "next";
 import { closeDb, db } from "@/db";
@@ -60,8 +60,10 @@ ${signal} received — shutting down…`);
     watch("src/db/schema.ts", () =>
       console.warn("\n⚠ src/db/schema.ts changed: restart the dev server (Ctrl+C, then npm run dev) so every part of the app uses the new schema.\n")
     );
+    // The journal is written last when a migration is added; poll it (fs.watch misses copies on Windows).
     let timer: ReturnType<typeof setTimeout> | undefined;
-    watch(MIGRATIONS_FOLDER, { recursive: true }, () => {
+    watchFile(`${MIGRATIONS_FOLDER}/meta/_journal.json`, { interval: 2000 }, (cur, prev) => {
+      if (cur.mtimeMs === prev.mtimeMs) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
         runMigrations(db)

@@ -164,7 +164,12 @@ export async function sharedView(conn: DB, share: ResolvedShare, projectKey?: st
   if (!link.lastViewedAt || Date.now() - link.lastViewedAt.getTime() > 60_000) {
     await conn.update(shareLinks).set({ viewCount: sql`${shareLinks.viewCount} + 1`, lastViewedAt: new Date() }).where(eq(shareLinks.id, link.id));
   }
-  if (!project) return { orgName: share.orgName, scope: link.projectId ? "project" : "workspace", projects: allProjects, project: null };
+  if (!project) return { orgName: share.orgName, scope: link.projectId ? "project" : "workspace", projects: allProjects, project: null, columns: undefined, tasks: undefined, includeComments: false };
+  return { orgName: share.orgName, scope: link.projectId ? "project" : "workspace", projects: allProjects, ...(await projectReadView(conn, link.organizationId, project, link.includeComments)) };
+}
+
+/** Read-only board data for one project (share links and guests). No emails; comments only when allowed. */
+export async function projectReadView(conn: DB, organizationId: string, project: { id: string; key: string; name: string; description: string | null }, includeComments: boolean) {
 
   const [columns, rows, tagRows, teamRows] = await Promise.all([
     conn.select({ id: boardColumns.id, title: boardColumns.title, color: boardColumns.color }).from(boardColumns).where(eq(boardColumns.projectId, project.id)).orderBy(asc(boardColumns.position)),
@@ -172,11 +177,11 @@ export async function sharedView(conn: DB, share: ResolvedShare, projectKey?: st
       .select({ task: tasks, assignee: users.name })
       .from(tasks)
       .leftJoin(users, eq(users.id, tasks.assigneeId))
-      .where(and(eq(tasks.organizationId, link.organizationId), eq(tasks.projectId, project.id)))
+      .where(and(eq(tasks.organizationId, organizationId), eq(tasks.projectId, project.id)))
       .orderBy(asc(tasks.position))
       .limit(1000),
     conn.select({ taskId: taskTags.taskId, name: tags.name, color: tags.color }).from(taskTags).innerJoin(tags, eq(tags.id, taskTags.tagId)).innerJoin(tasks, eq(tasks.id, taskTags.taskId)).where(eq(tasks.projectId, project.id)),
-    conn.select({ id: teams.id, name: teams.name, color: teams.color }).from(teams).where(eq(teams.organizationId, link.organizationId)),
+    conn.select({ id: teams.id, name: teams.name, color: teams.color }).from(teams).where(eq(teams.organizationId, organizationId)),
   ]);
   const ids = rows.map((r) => r.task.id);
   const [checks, comments] = await Promise.all([
@@ -187,7 +192,7 @@ export async function sharedView(conn: DB, share: ResolvedShare, projectKey?: st
           .where(inArray(checklistItems.taskId, ids))
           .groupBy(checklistItems.taskId)
       : Promise.resolve([]),
-    link.includeComments && ids.length
+    includeComments && ids.length
       ? conn
           .select({ taskId: taskComments.taskId, body: taskComments.body, createdAt: taskComments.createdAt, author: users.name, viaAutomation: sql<boolean>`${taskComments.automationId} is not null` })
           .from(taskComments)
@@ -200,12 +205,9 @@ export async function sharedView(conn: DB, share: ResolvedShare, projectKey?: st
   const refOf = new Map(rows.map((r) => [r.task.id, `${project.key}-${r.task.taskNumber}`]));
   const teamOf = new Map(teamRows.map((t) => [t.id, t]));
   return {
-    orgName: share.orgName,
-    scope: link.projectId ? "project" : "workspace",
-    projects: allProjects,
     project,
     columns,
-    includeComments: link.includeComments,
+    includeComments,
     tasks: rows.map(({ task: t, assignee }) => ({
       id: t.id,
       ref: refOf.get(t.id)!,

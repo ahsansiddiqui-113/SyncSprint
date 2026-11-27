@@ -54,8 +54,13 @@ const PHASES: { name: string; status: Status; items: string[] }[] = [
   },
   {
     name: "Enterprise & reach",
+    status: "shipped",
+    items: ["Single sign-on, two-step sign-in and user provisioning", "Project and task templates, Ctrl+K search", "WIP limits, swimlanes, flow analytics, intake forms", "Slack, Teams, Discord, email, push, calendar, WhatsApp", "GitHub and GitLab links, guest access for clients"],
+  },
+  {
+    name: "Deeper integrations",
     status: "next",
-    items: ["Single sign-on and user provisioning", "Installable mobile app with offline reading", "Custom reports by email", "Slack, Teams and GitHub integrations"],
+    items: ["Two-way Slack and Teams apps", "Custom roles", "Native mobile apps", "More languages"],
   },
 ];
 

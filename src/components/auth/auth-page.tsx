@@ -4,7 +4,8 @@ import { Check } from "lucide-react";
 import { AuthForm } from "./auth-form";
 import { DemoButton } from "./demo-button";
 import { Logo } from "@/components/ui/card";
-import { isGoogleEnabled } from "@/lib/auth";
+import { isGoogleEnabled, isMicrosoftEnabled } from "@/lib/auth";
+import { ssoAvailable } from "@/server/services/sso-hooks";
 
 const POINTS = [
   "Boards, lists, calendars, timelines and dashboards",
@@ -12,7 +13,9 @@ const POINTS = [
   "An AI assistant that helps you plan and prioritize",
 ];
 
-export function AuthPage({ mode }: { mode: "sign-in" | "sign-up" }) {
+export async function AuthPage({ mode }: { mode: "sign-in" | "sign-up" }) {
+  // Offer "Sign in with your company" only once some workspace has verified SSO.
+  const sso = await ssoAvailable();
   return (
     <main className="grid min-h-screen bg-white lg:grid-cols-[1.05fr_1fr]">
       <div className="relative hidden flex-col justify-between overflow-hidden bg-linear-to-br from-[#7b68ee] via-[#8e5cf0] to-[#e44a8a] p-12 text-white lg:flex">
@@ -38,7 +41,7 @@ export function AuthPage({ mode }: { mode: "sign-in" | "sign-up" }) {
       <div className="flex flex-col items-center justify-center gap-8 bg-canvas px-6 py-12">
         <Link href="/" className="lg:hidden"><Logo /></Link>
         <Suspense>
-          <AuthForm mode={mode} googleEnabled={isGoogleEnabled} />
+          <AuthForm mode={mode} providers={{ google: isGoogleEnabled, microsoft: isMicrosoftEnabled, sso }} />
         </Suspense>
         <div className="flex w-full max-w-md items-center gap-3 text-[14px] text-subtle">
           <span className="h-px flex-1 bg-border-strong" /> or just explore <span className="h-px flex-1 bg-border-strong" />

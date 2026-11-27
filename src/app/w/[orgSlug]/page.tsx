@@ -7,6 +7,9 @@ import { listProjects } from "@/server/services/workspace";
 import { Card, PageHeader } from "@/components/ui/card";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { CreateProjectForm } from "@/components/workspace/create-project-form";
+import { OnboardingChecklist } from "@/components/workspace/onboarding-checklist";
+import { getOnboarding } from "@/server/services/onboarding";
+import { isAdminRole } from "@/lib/rbac-shared";
 
 const GRADIENTS = ["from-violet-500/30 to-indigo-500/5", "from-sky-500/30 to-cyan-500/5", "from-emerald-500/30 to-teal-500/5", "from-amber-500/30 to-orange-500/5"];
 
@@ -14,10 +17,14 @@ export default async function ProjectsPage({ params }: { params: Promise<{ orgSl
   const { orgSlug } = await params;
   const { user, org, role } = await loadWorkspace(orgSlug);
   const { projects } = await orNotFound(() => listProjects(db, user.id, orgSlug));
+  const onboarding = isAdminRole(role) ? await getOnboarding(db, user.id, org.id, org.slug) : null;
 
   return (
     <main className="w-full px-10 py-10 2xl:px-14">
       <PageHeader eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Projects" }]} />} title="Projects" description="Each project has its own board, task numbering and real-time activity." />
+      {onboarding && onboarding.done < onboarding.total && (
+        <OnboardingChecklist organizationId={org.id} steps={onboarding.steps} done={onboarding.done} total={onboarding.total} canDismiss />
+      )}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {projects.map((p, i) => (
           <Link key={p.id} href={`/w/${org.slug}/projects/${p.key}`} className="group">
@@ -45,9 +52,9 @@ export default async function ProjectsPage({ params }: { params: Promise<{ orgSl
       </div>
 
       {can(role, "MANAGE_PROJECTS") ? (
-        <Card className="mt-10 p-6">
+        <Card id="new-project" className="mt-10 scroll-mt-6 p-6">
           <h2 className="font-semibold tracking-tight">New project</h2>
-          <p className="mb-4 mt-1 text-sm text-muted">Creates a board with Backlog, In Progress, Review and Done.</p>
+          <p className="mb-4 mt-1 text-sm text-muted">Start blank or from a template with statuses, custom fields and starter tasks ready to go.</p>
           <CreateProjectForm organizationId={org.id} orgSlug={org.slug} />
         </Card>
       ) : (

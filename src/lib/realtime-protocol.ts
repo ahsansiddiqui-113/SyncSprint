@@ -54,7 +54,7 @@ export type OrgEvent =
   | { type: "COLUMN_REBALANCED"; columnId: string; positions: Record<string, number> }
   | { type: "COMMENT_ADDED"; actor: Actor; taskId: string; commentId: string }
   /** Checklist / tag / dependency changes: clients refetch the project's meta. */
-  | { type: "TASK_META_CHANGED"; actor: Actor; projectId: string; taskIds: string[]; kind: "checklist" | "tags" | "dependencies" | "fields" | "people" }
+  | { type: "TASK_META_CHANGED"; actor: Actor; projectId: string; taskIds: string[]; kind: "checklist" | "tags" | "dependencies" | "fields" | "people" | "dev" }
   /** Sprint created / started / completed / edited / deleted: clients refetch the sprint list. */
   | { type: "SPRINTS_CHANGED"; actor: Actor; projectId: string }
   /** Statuses or custom fields changed: clients refresh the project definition. */

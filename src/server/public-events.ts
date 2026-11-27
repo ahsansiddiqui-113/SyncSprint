@@ -5,6 +5,7 @@ import { db, type DbOrTx } from "@/db";
 import { boardColumns, organizations, projects, users, type Task } from "@/db/schema";
 import { appBaseUrl } from "@/lib/base-url";
 import { dispatchEvent, type WebhookEvent } from "@/server/services/webhooks";
+import { chatActive, chatFromEvent } from "@/server/services/chat";
 
 /** The public (API + webhook) shape of a task. Stable field names, no internal ids beyond ours. */
 export type PublicTask = {
@@ -73,10 +74,18 @@ export async function toPublicTasks(conn: DbOrTx, organizationId: string, rows: 
  */
 export function publishEvent(organizationId: string, event: WebhookEvent, build: () => Promise<unknown>) {
   const run = async () => {
+    // Build the public payload at most once, shared by webhooks and chat alerts.
+    let cached: Promise<unknown> | null = null;
+    const lazy = () => (cached ??= build());
     try {
-      await dispatchEvent(db, organizationId, event, build);
+      await dispatchEvent(db, organizationId, event, lazy);
     } catch (err) {
       console.error("[webhooks] dispatch failed", err);
+    }
+    try {
+      if (event !== "ping" && (await chatActive(db, organizationId))) await chatFromEvent(db, organizationId, event, await lazy());
+    } catch (err) {
+      console.error("[chat] delivery failed", err);
     }
   };
   try {

@@ -85,6 +85,7 @@ const ROLE: Record<OrgRole, string> = {
   admin: "border-indigo-200 bg-indigo-50 text-indigo-700",
   member: "border-emerald-200 bg-emerald-50 text-emerald-700",
   viewer: "border-zinc-200 bg-zinc-50 text-zinc-600",
+  guest: "border-amber-200 bg-amber-50 text-amber-700",
 };
 
 export function RoleBadge({ role }: { role: OrgRole }) {

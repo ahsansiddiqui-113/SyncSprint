@@ -24,7 +24,7 @@ export async function addStatusAction(organizationId: string, projectId: string,
     return { id: col.id };
   });
 }
-export async function updateStatusAction(organizationId: string, columnId: string, patch: { title?: string; color?: string | null }) {
+export async function updateStatusAction(organizationId: string, columnId: string, patch: { title?: string; color?: string | null; wipLimit?: number | null }) {
   return toResult(async () => {
     const actor = await requireActor();
     const col = await svc.updateStatus(db, actor.id, organizationId, columnId, patch);

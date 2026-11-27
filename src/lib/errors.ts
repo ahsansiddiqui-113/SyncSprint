@@ -14,7 +14,10 @@ export type AppErrorCode =
   /** Billing: the workspace is read-only (trial over, payment overdue) or locked. */
   | "WORKSPACE_READ_ONLY"
   | "WORKSPACE_LOCKED"
-  | "SEAT_LIMIT";
+  | "SEAT_LIMIT"
+  /** Workspace security policy (Phase 9). */
+  | "TWO_FACTOR_REQUIRED"
+  | "IP_NOT_ALLOWED";
 
 /** Errors whose `code` is safe to show to the client. */
 import { ZodError } from "zod";

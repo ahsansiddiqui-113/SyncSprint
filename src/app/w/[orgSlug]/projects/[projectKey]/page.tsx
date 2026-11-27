@@ -20,7 +20,7 @@ export default async function BoardPage({ params }: { params: Promise<{ orgSlug:
       org={{ id: board.org.id, slug: board.org.slug, name: board.org.name, isDemo: board.org.isDemo }}
       role={board.role}
       project={{ id: board.project.id, key: board.project.key, name: board.project.name }}
-      columns={board.columns.map((c) => ({ id: c.id, title: c.title, color: c.color }))}
+      columns={board.columns.map((c) => ({ id: c.id, title: c.title, color: c.color, wipLimit: c.wipLimit }))}
       initialTasks={board.tasks.map(toTaskDTO)}
       members={board.members.map((m) => ({ id: m.userId, name: m.name, avatarUrl: m.avatarUrl, role: m.role }))}
       aiEnabled={aiConfigured()}

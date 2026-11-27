@@ -96,9 +96,38 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
 - ✅ **Mind maps**: automatic left-to-right layout, Tab adds a child, Enter a sibling, collapse branches; "branch to tasks" turns each branch into a task and the ideas under it into subtasks (safe to run again after adding ideas)
 - ✅ **Breadcrumbs** on every workspace page (workspace › section › page)
 
-## Phase 9 — Enterprise & reach (proposed)
-- ⬜ SSO (SAML / OIDC) and SCIM user provisioning
-- ⬜ Mobile-friendly PWA with offline read and queued edits
-- ⬜ Advanced reporting: custom dashboards and scheduled email reports
-- ⬜ Slack / Teams / GitHub integrations (link PRs to tasks, notifications to channels)
-- ⬜ Data residency and audit-log export for compliance
+## Phase 9 — Enterprise & reach ✅
+**Security & sign-in**
+- ✅ Sign in with Microsoft (alongside Google); company **single sign-on** over OIDC or SAML 2.0, one provider per workspace, domain proven with a DNS TXT record, optional **require SSO** for that domain; new people on the domain join as members on first sign-in
+- ✅ **Two-step sign-in** (authenticator app, 10 backup codes, trust this device for 30 days) and a workspace switch to **require it for everyone**
+- ✅ **Allowed networks** (IP / CIDR allow-list, IPv4 + IPv6) enforced in the one server-side guard for every page, action and API call; refuses a list that would lock out the admin saving it
+- ✅ **SCIM 2.0** provisioning (Okta, Entra ID, OneLogin, JumpCloud): create, update, deactivate; never removes the last admin
+- ✅ Signed-in devices list with "sign out other devices"; audit log CSV export and retention (90 days minimum); **full workspace export** (JSON, no secrets)
+
+**Getting started & speed**
+- ✅ 5 built-in **project templates** (Scrum, bug tracking, marketing campaign, client onboarding, product roadmap) + "save project as template"; **task templates** with checklist, tags and subtasks
+- ✅ Getting-started checklist on the workspace home; **Ctrl/Cmd+K** search for tasks (title or ENG-12), projects, docs, goals, people and pages
+
+**Board power (Azure Boards / ClickUp)**
+- ✅ **WIP limits** per status (warn, never block); **swimlanes** by assignee, priority or type, drag between rows to change the field
+- ✅ **Flow analytics**: cumulative flow diagram, cycle time scatter with 50th/85th percentiles, lead time, weekly throughput, WIP
+- ✅ **Intake forms**: public link, each response becomes a task (status, assignee, tags, custom fields), honeypot + rate limit, paused while read-only
+- ✅ **Reminders** on tasks, delivered to the inbox (and push/email)
+
+**Reaching people outside the app**
+- ✅ Per-workspace notification preferences: **push** (installable PWA with service worker), **instant email**, **daily/weekly digest**, **WhatsApp**
+- ✅ **Slack, Microsoft Teams, Discord, Google Chat** alerts per workspace or project (URLs encrypted, provider hosts only, auto-off after 10 failures)
+- ✅ Private **calendar feed** (ICS) of due dates and time off for Google / Outlook / Apple Calendar
+- ✅ **Email-to-task** per project (members only, created as the sender, quoted replies stripped)
+
+**Developers**
+- ✅ **GitHub & GitLab**: verified webhooks link commits, branches and pull/merge requests that mention ENG-12; a merged "fixes ENG-12" moves the task to Done; Development panel on the task
+
+**Clients**
+- ✅ **Guest** role (free): sees only the projects an admin ticks, can comment there; refused by every other service by design
+
+## Phase 10 — Next (proposed)
+- ⬜ Slack/Teams apps with slash commands and two-way actions
+- ⬜ Custom roles and permission sets
+- ⬜ Native mobile apps; offline editing
+- ⬜ Languages (including right-to-left) and data residency

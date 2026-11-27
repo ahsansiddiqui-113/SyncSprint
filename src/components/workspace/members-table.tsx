@@ -60,7 +60,7 @@ export function MembersTable({
                   run(() => changeMemberRoleAction(organizationId, m.userId, e.target.value as OrgRole), `${m.name} is now ${e.target.value}`)
                 }
               >
-                {(["admin", "member", "viewer"] as const)
+                {(["admin", "member", "viewer", "guest"] as const)
                   .map((r) => (
                     <option key={r} value={r}>{r}</option>
                   ))}

@@ -150,3 +150,11 @@ export async function projectFlowSeriesAction(organizationId: string, projectId:
     return { series: await projectFlowSeries(db, actor.id, organizationId, projectId, days) };
   });
 }
+
+export async function flowMetricsAction(organizationId: string, projectId: string, days: number) {
+  return toResult(async () => {
+    const actor = await requireActor();
+    const { flowMetrics } = await import("@/server/services/flow");
+    return await flowMetrics(db, actor.id, organizationId, projectId, days);
+  });
+}

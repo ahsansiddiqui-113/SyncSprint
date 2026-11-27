@@ -8,6 +8,7 @@ import { toResult } from "@/lib/errors";
 import { requireActor } from "@/lib/session";
 import { broadcastOrgEvent, hub } from "@/server/realtime-hub";
 import * as ws from "@/server/services/workspace";
+import { createProjectFromTemplate } from "@/server/services/templates";
 
 export async function createOrganizationAction(name: string) {
   const res = await toResult(async () => {
@@ -19,10 +20,11 @@ export async function createOrganizationAction(name: string) {
   return res;
 }
 
-export async function createProjectAction(input: { organizationId: string; name: string; key: string; description?: string }) {
+export async function createProjectAction(input: { organizationId: string; name: string; key: string; description?: string; templateId?: string | null }) {
   return toResult(async () => {
     const actor = await requireActor();
-    const project = await ws.createProject(db, actor.id, input);
+    // With a template: statuses, fields, tags and starter tasks are set up too.
+    const project = await createProjectFromTemplate(db, actor.id, input);
     revalidatePath("/w", "layout");
     return { key: project.key };
   });

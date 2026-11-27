@@ -1,5 +1,8 @@
 "use client";
 
+import { SaveTaskTemplateButton } from "./templates-menu";
+import { RemindMe } from "./remind-me";
+import { DevLinks } from "./dev-links";
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { CalendarDays, Clock, Columns3, Hash, Rocket, Shapes, SlidersHorizontal, Tag as TagIcon, Timer, Users, Flag, GitMerge, Loader2, MessageSquare, Plus, Repeat, Sparkles, Trash2, UserRound, UsersRound, Wand2, Zap } from "lucide-react";
@@ -193,6 +196,8 @@ export function TaskDrawer(props: {
             >
               <Trash2 className="h-3.5 w-3.5" /> Delete
             </Button>
+            {canEdit && <SaveTaskTemplateButton organizationId={ctx.org.id} taskId={task.id} title={task.title} />}
+            <RemindMe organizationId={ctx.org.id} taskId={task.id} />
             <span className="ml-auto text-[14px] text-subtle">{dirty ? "Unsaved changes" : "All changes saved"}</span>
             {dirty && (
               <Button variant="ghost" size="sm" onClick={reset} disabled={pending}>
@@ -423,6 +428,7 @@ export function TaskDrawer(props: {
 
       <TimeSection ctx={ctx} task={task} />
       <AttachmentsSection ctx={ctx} task={task} />
+      <DevLinks organizationId={ctx.org.id} taskId={task.id} />
       <SubtasksSection {...breakdown} />
       <ChecklistSection {...breakdown} />
       <DependenciesSection {...breakdown} />

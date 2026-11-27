@@ -36,7 +36,7 @@ export function InvitePanel({ organizationId, actorRole, invites }: { organizati
       >
         <Input name="email" type="email" required placeholder="teammate@company.com" className="min-w-56 flex-1" />
         <Select name="role" defaultValue="member" className="w-28">
-          {(["admin", "member", "viewer"] as const).map((r) => (
+          {(["admin", "member", "viewer", "guest"] as const).map((r) => (
             <option key={r} value={r}>{r}</option>
           ))}
         </Select>
