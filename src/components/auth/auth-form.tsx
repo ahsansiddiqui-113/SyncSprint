@@ -46,7 +46,8 @@ export function AuthForm({ mode, providers }: { mode: "sign-in" | "sign-up"; pro
     done();
   }
 
-  const social = (provider: "google" | "microsoft") => authClient.signIn.social({ provider, callbackURL: safeNext });
+  const social = (provider: "google" | "microsoft") => authClient.signIn.social({ provider, callbackURL: safeNext, errorCallbackURL: "/sign-in" });
+  const oauthError = params.get("error");
 
   if (step === "two-factor") return <TwoFactorStep onDone={done} onBack={() => setStep("credentials")} />;
   if (step === "sso") return <SsoStep callbackURL={safeNext} onBack={() => setStep("credentials")} />;
@@ -56,6 +57,7 @@ export function AuthForm({ mode, providers }: { mode: "sign-in" | "sign-up"; pro
     <Card className="w-full max-w-md border-border p-8 shadow-lift">
       <h1 className="text-2xl font-semibold tracking-tight">{mode === "sign-in" ? "Welcome back" : "Create your account"}</h1>
       <p className="mt-1 text-sm text-muted">{mode === "sign-in" ? "Sign in to your workspaces." : "Start a workspace and invite your team."}</p>
+      {oauthError && <OAuthErrorNotice code={oauthError} />}
       <form onSubmit={onSubmit} className="mt-6 space-y-4">
         {mode === "sign-up" && (
           <div className="space-y-1.5">
@@ -214,5 +216,25 @@ function MicrosoftMark() {
       <path fill="#00A4EF" d="M1 12.5h10.5V23H1z" />
       <path fill="#FFB900" d="M12.5 12.5H23V23H12.5z" />
     </svg>
+  );
+}
+
+/** Plain-language help when Google/Microsoft sign-in comes back with an error. */
+function OAuthErrorNotice({ code }: { code: string }) {
+  const notLinked = code === "account_not_linked";
+  return (
+    <div role="alert" className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-[14px] leading-relaxed text-amber-900">
+      {notLinked ? (
+        <>
+          <b>This email already has a SyncSprint account.</b> For your safety we don&apos;t attach a new sign-in method automatically.
+          Sign in below with your password (or the method you used before), then open <b>Account → Sign-in &amp; security</b> and click <b>Connect</b>.
+          After that, this button signs you straight in.
+        </>
+      ) : (
+        <>
+          <b>That sign-in didn&apos;t complete</b> ({code.replace(/_/g, " ")}). Please try again, or sign in with your email and password.
+        </>
+      )}
+    </div>
   );
 }

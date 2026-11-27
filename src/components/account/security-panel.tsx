@@ -12,7 +12,10 @@ import { Card } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { timeAgo } from "@/lib/utils";
 
-type Props = { enabled: boolean; isDemo: boolean; hasPassword: boolean; linked: string[]; requiredBy: string | null; requiredSlug: string | null };
+type Props = {
+  enabled: boolean; isDemo: boolean; hasPassword: boolean; linked: string[]; requiredBy: string | null; requiredSlug: string | null;
+  available: string[]; justLinked: string | null; linkError: string | null;
+};
 type Setup = { uri: string; qr: string; secret: string; backupCodes: string[] };
 
 export function SecurityPanel(props: Props) {
@@ -139,11 +142,8 @@ export function SecurityPanel(props: Props) {
         )}
       </Card>
 
-      {props.linked.length > 0 && (
-        <Card className="p-6">
-          <h2 className="text-lg font-bold">Linked sign-in</h2>
-          <p className="mt-1 text-[14.5px] text-muted">You can also sign in with: {props.linked.map((p) => p.replace(/^./, (c) => c.toUpperCase())).join(", ")}.</p>
-        </Card>
+      {(props.available.length > 0 || props.linked.length > 0) && (
+        <LinkedSignIn available={props.available} linked={props.linked} isDemo={props.isDemo} justLinked={props.justLinked} linkError={props.linkError} />
       )}
 
       <Sessions />
@@ -264,6 +264,56 @@ function Sessions() {
                   if (error) return void toast.error(error.message ?? "Couldn't sign it out");
                   setRows((r) => r?.filter((x) => x.id !== s.id) ?? null);
                 }}>Sign out</Button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+const PROVIDER_LABEL: Record<string, string> = { google: "Google", microsoft: "Microsoft" };
+const LINK_ERRORS: Record<string, string> = {
+  email_does_not_match: "That account uses a different email than your SyncSprint account.",
+  account_already_linked_to_different_user: "That account is already connected to another SyncSprint user.",
+  unable_to_link_account: "Couldn't connect that account. Try again.",
+};
+
+/** Sign-in methods on this account, with "Connect" for the ones not linked yet (explicit, owner-initiated linking). */
+function LinkedSignIn({ available, linked, isDemo, justLinked, linkError }: { available: string[]; linked: string[]; isDemo: boolean; justLinked: string | null; linkError: string | null }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => {
+    if (justLinked && linked.includes(justLinked)) toast.success(`${PROVIDER_LABEL[justLinked] ?? justLinked} connected`, { description: "You can now sign in with it." });
+    else if (linkError) toast.error("Couldn't connect that account", { description: LINK_ERRORS[linkError] ?? linkError.replace(/_/g, " ") });
+    if (justLinked || linkError) router.replace("/account/security");
+  }, [justLinked, linkError, linked, router]);
+  const providers = [...new Set([...available, ...linked])];
+  async function connect(provider: string) {
+    setBusy(provider);
+    const { error } = await authClient.linkSocial({ provider: provider as "google" | "microsoft", callbackURL: `/account/security?linked=${provider}`, errorCallbackURL: "/account/security" });
+    if (error) {
+      setBusy(null);
+      toast.error(error.message ?? "Couldn't start connecting");
+    }
+  }
+  return (
+    <Card className="p-6">
+      <h2 className="text-lg font-bold">Linked sign-in</h2>
+      <p className="mt-1 text-[14.5px] text-muted">Other ways to sign in to this same account. Connect one while you're signed in here.</p>
+      <ul className="mt-4 divide-y divide-border rounded-xl border border-border">
+        {providers.map((p) => {
+          const on = linked.includes(p);
+          return (
+            <li key={p} className="flex items-center gap-3 px-4 py-3">
+              <span className="flex-1 text-[15px] font-medium">{PROVIDER_LABEL[p] ?? p}</span>
+              {on ? (
+                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[12.5px] font-semibold text-emerald-800">Connected</span>
+              ) : (
+                <Button size="sm" variant="outline" disabled={isDemo || busy !== null} onClick={() => void connect(p)}>
+                  {busy === p && <Loader2 className="h-4 w-4 animate-spin" />} Connect {PROVIDER_LABEL[p] ?? p}
+                </Button>
               )}
             </li>
           );
