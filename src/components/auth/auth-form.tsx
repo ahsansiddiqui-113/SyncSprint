@@ -116,7 +116,19 @@ function TwoFactorStep({ onDone, onBack }: { onDone: () => void; onBack: () => v
       ? await authClient.twoFactor.verifyBackupCode({ code, trustDevice: trust })
       : await authClient.twoFactor.verifyTotp({ code, trustDevice: trust });
     setPending(false);
-    if (error) return void toast.error(error.message ?? "That code didn't work");
+    if (error) {
+      const code = (error as { code?: string }).code ?? "";
+      // After 5 wrong tries (or ~10 minutes) this sign-in step expires: every code fails until the password is entered again.
+      if (code === "INVALID_TWO_FACTOR_COOKIE" || /two factor cookie/i.test(error.message ?? "")) {
+        toast.error("This sign-in step has expired", { description: "Too many tries or too much time passed. Enter your password again, then a fresh code.", duration: 10000 });
+        return onBack();
+      }
+      if (error.status === 429) return void toast.error("Too many wrong codes", { description: "Your account is locked for a few minutes. Try again later.", duration: 10000 });
+      return void toast.error(backup ? "That backup code didn't work" : "That code didn't match", {
+        description: backup ? "Each backup code works once." : "Use the newest SyncSprint entry in your app, and make sure your phone sets its time automatically.",
+        duration: 8000,
+      });
+    }
     onDone();
   }
   return (
