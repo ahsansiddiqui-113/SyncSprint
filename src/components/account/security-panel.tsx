@@ -34,7 +34,12 @@ export function SecurityPanel(props: Props) {
     setBusy(true);
     const { error } = await authClient.twoFactor.verifyTotp({ code: code.replace(/\s/g, "") });
     setBusy(false);
-    if (error) return void toast.error(error.message ?? "That code didn't match. Check the time on your phone and try again.");
+    if (error) {
+      return void toast.error("That code didn't match", {
+        description: "Use the newest SyncSprint entry in your app (delete older ones: each set-up makes a new key), and make sure your phone sets its time automatically.",
+        duration: 10000,
+      });
+    }
     setCodes(setup!.backupCodes);
     setSetup(null);
     setEnabled(true);
@@ -104,6 +109,9 @@ export function SecurityPanel(props: Props) {
                 <li>Can't scan? Enter this key: <code className="rounded bg-surface-2 px-1.5 py-0.5 text-[13px]">{setup.secret.match(/.{1,4}/g)?.join(" ")}</code></li>
                 <li>Type the 6-digit code it shows to finish.</li>
               </ol>
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13.5px] text-amber-900">
+                This is a new key. If your app already has a SyncSprint entry from an earlier try, delete it: its codes won&apos;t work any more.
+              </p>
               <CodeForm busy={busy} label="Code from the app" onSubmit={confirm} submit="Turn on" />
               <button className="cursor-pointer text-[13.5px] text-muted hover:underline" onClick={() => setSetup(null)}>Cancel</button>
             </div>
