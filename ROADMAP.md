@@ -87,8 +87,47 @@ Legend: ✅ done · 🚧 in progress · ⬜ planned
 - ✅ **Groups** (QA, Developers, Marketing...): lead + members, admins or the lead manage members; assign tasks to a group (its queue until someone takes them); @group mentions notify everyone; group pages track open work, queue, overdue, finished per week, hours logged and this week's workload; automations can filter by and send to a group
 - ✅ **Share links**: read-only links for people without an account. Admin-only, one project by default or the whole workspace on purpose, optional expiry and password (scrypt, 10 tries per 15 minutes), optional comments, hashed tokens, view counts, revocable; never shows emails; no indexing, framing or referrer leaks; stop working while a workspace is locked
 
-## Phase 8 — Visual planning (next)
-- ⬜ Whiteboard / mind map view
-- ⬜ Gantt baselines and critical path
-- ⬜ Portfolio view across projects
-- ⬜ Scheduled automations (e.g. "every Monday", "2 days before due")
+## Phase 8 — Visual planning ✅
+- ✅ **Gantt baselines**: admins save a snapshot of every dated task (up to 10 per project); the Timeline draws the saved plan as a grey bar under each task, a +Nd / −Nd chip where dates moved, and a "vs. baseline" summary (how many slipped, worst slip)
+- ✅ **Critical path** (CPM in working days over open tasks and "blocked by" links): toggle on the Timeline to highlight the chain in red, dim everything with slack, show slack per task in its tooltip and the earliest possible finish date
+- ✅ **Portfolio** (`/w/…/portfolio`): every project on one page with health worked out from the data (on track / at risk / late / done / not scheduled), progress against time used, open and overdue work, points, dates, active sprint, and admin-written status updates (on track, at risk, off track, on hold, complete + note)
+- ✅ **Scheduled automations**: "a due date is coming up" (N days before), "a task becomes overdue", and "on a schedule" (every day / weekday / chosen weekday at an hour in the creator's time zone). Each firing is recorded once (rule + task + occasion) so retries and several servers never double-fire; paused while a workspace is read-only or locked; runs every minute on a long-running server, from a Vercel cron (`/api/cron/automations`, `CRON_SECRET`), and is nudged by active users on serverless
+- ✅ **Whiteboards** (new project view): sticky notes, rectangles, ellipses, text, arrows that follow the items they connect, and live task cards; pan / zoom, colours, resize; turn any note into a task (the card then shows the live task). Every item is versioned so two people dragging the same note never overwrite each other silently
+- ✅ **Mind maps**: automatic left-to-right layout, Tab adds a child, Enter a sibling, collapse branches; "branch to tasks" turns each branch into a task and the ideas under it into subtasks (safe to run again after adding ideas)
+- ✅ **Breadcrumbs** on every workspace page (workspace › section › page)
+
+## Phase 9 — Enterprise & reach ✅
+**Security & sign-in**
+- ✅ Sign in with Microsoft (alongside Google); company **single sign-on** over OIDC or SAML 2.0, one provider per workspace, domain proven with a DNS TXT record, optional **require SSO** for that domain; new people on the domain join as members on first sign-in
+- ✅ **Two-step sign-in** (authenticator app, 10 backup codes, trust this device for 30 days) and a workspace switch to **require it for everyone**
+- ✅ **Allowed networks** (IP / CIDR allow-list, IPv4 + IPv6) enforced in the one server-side guard for every page, action and API call; refuses a list that would lock out the admin saving it
+- ✅ **SCIM 2.0** provisioning (Okta, Entra ID, OneLogin, JumpCloud): create, update, deactivate; never removes the last admin
+- ✅ Signed-in devices list with "sign out other devices"; audit log CSV export and retention (90 days minimum); **full workspace export** (JSON, no secrets)
+
+**Getting started & speed**
+- ✅ 5 built-in **project templates** (Scrum, bug tracking, marketing campaign, client onboarding, product roadmap) + "save project as template"; **task templates** with checklist, tags and subtasks
+- ✅ Getting-started checklist on the workspace home; **Ctrl/Cmd+K** search for tasks (title or ENG-12), projects, docs, goals, people and pages
+
+**Board power (Azure Boards / ClickUp)**
+- ✅ **WIP limits** per status (warn, never block); **swimlanes** by assignee, priority or type, drag between rows to change the field
+- ✅ **Flow analytics**: cumulative flow diagram, cycle time scatter with 50th/85th percentiles, lead time, weekly throughput, WIP
+- ✅ **Intake forms**: public link, each response becomes a task (status, assignee, tags, custom fields), honeypot + rate limit, paused while read-only
+- ✅ **Reminders** on tasks, delivered to the inbox (and push/email)
+
+**Reaching people outside the app**
+- ✅ Per-workspace notification preferences: **push** (installable PWA with service worker), **instant email**, **daily/weekly digest**, **WhatsApp**
+- ✅ **Slack, Microsoft Teams, Discord, Google Chat** alerts per workspace or project (URLs encrypted, provider hosts only, auto-off after 10 failures)
+- ✅ Private **calendar feed** (ICS) of due dates and time off for Google / Outlook / Apple Calendar
+- ✅ **Email-to-task** per project (members only, created as the sender, quoted replies stripped)
+
+**Developers**
+- ✅ **GitHub & GitLab**: verified webhooks link commits, branches and pull/merge requests that mention ENG-12; a merged "fixes ENG-12" moves the task to Done; Development panel on the task
+
+**Clients**
+- ✅ **Guest** role (free): sees only the projects an admin ticks, can comment there; refused by every other service by design
+
+## Phase 10 — Next (proposed)
+- ⬜ Slack/Teams apps with slash commands and two-way actions
+- ⬜ Custom roles and permission sets
+- ⬜ Native mobile apps; offline editing
+- ⬜ Languages (including right-to-left) and data residency

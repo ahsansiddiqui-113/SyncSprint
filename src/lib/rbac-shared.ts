@@ -8,9 +8,10 @@ export type { OrgRole };
  * the workspace is handed to. The platform owner (the vendor) is NOT a workspace role;
  * see src/lib/platform.ts. "owner" survives only as a legacy alias of admin.
  */
-export const ROLES: readonly OrgRole[] = ["admin", "member", "viewer"] as const;
+export const ROLES: readonly OrgRole[] = ["admin", "member", "viewer", "guest"] as const;
 
 export const ROLE_WEIGHT: Record<OrgRole, number> = {
+  guest: 0, // sees only the projects they are added to (checked separately), never passes a role check
   viewer: 1,
   member: 2,
   admin: 3,

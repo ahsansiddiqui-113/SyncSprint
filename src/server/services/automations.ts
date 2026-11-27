@@ -43,10 +43,23 @@ export const triggerSchema: z.ZodType<AutomationTrigger> = z.discriminatedUnion(
   z.object({ kind: z.literal("status_changed"), toColumnId: uuid.nullable() }),
   z.object({ kind: z.literal("assignee_changed") }),
   z.object({ kind: z.literal("priority_changed"), to: z.enum(PRIORITIES).nullable() }),
+  z.object({ kind: z.literal("due_soon"), days: z.number().int().min(0).max(30) }),
+  z.object({ kind: z.literal("overdue") }),
+  z.object({
+    kind: z.literal("schedule"),
+    every: z.enum(["day", "weekday", "week"]),
+    weekday: z.number().int().min(0).max(6).optional(),
+    hour: z.number().int().min(0).max(23),
+    timezone: z.string().max(64).refine((tz) => { try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; } }, "Unknown time zone"),
+  }),
 ]);
 
+/** Scheduled triggers run from the scheduler, not from a person's change. */
+export const SCHEDULED_KINDS = ["due_soon", "overdue", "schedule"] as const;
+export const isScheduled = (t: AutomationTrigger) => (SCHEDULED_KINDS as readonly string[]).includes(t.kind);
+
 export const conditionSchema: z.ZodType<AutomationCondition> = z.object({
-  field: z.enum(["priority", "type", "assignee", "tag", "team"]),
+  field: z.enum(["priority", "type", "assignee", "tag", "team", "status"]),
   op: z.enum(["is", "is_not"]),
   value: z.string().max(60).nullable(),
 });
@@ -87,7 +100,14 @@ async function validateRefs(conn: DbOrTx, organizationId: string, projectId: str
   const columnIds = [
     ...(a.trigger.kind === "status_changed" && a.trigger.toColumnId ? [a.trigger.toColumnId] : []),
     ...a.actions.flatMap((x) => (x.type === "move_to_status" ? [x.columnId] : [])),
+    ...a.conditions.flatMap((c) => (c.field === "status" ? [c.value ?? ""] : [])),
   ];
+  if (isScheduled(a.trigger) && a.actions.some((x) => x.type === "set_assignee" && x.userId === "actor")) {
+    throw new AppError("VALIDATION", "A scheduled rule has no person who made the change. Pick who to assign.");
+  }
+  if (a.trigger.kind === "schedule" && a.trigger.every === "week" && a.trigger.weekday === undefined) {
+    throw new AppError("VALIDATION", "Pick the day of the week");
+  }
   const userIds = [
     ...a.actions.flatMap((x) => (x.type === "set_assignee" && x.userId && x.userId !== "actor" ? [x.userId] : x.type === "notify" && x.target === "user" && x.userId ? [x.userId] : [])),
     ...a.conditions.flatMap((c) => (c.field === "assignee" && c.value ? [c.value] : [])),
@@ -213,16 +233,19 @@ export function triggerMatches(trigger: AutomationTrigger, change: TaskChange): 
       return !!before && before.assigneeId !== task.assigneeId;
     case "priority_changed":
       return !!before && before.priority !== task.priority && (trigger.to === null || trigger.to === task.priority);
+    default:
+      return false; // scheduled triggers fire from the scheduler
   }
 }
 
-async function conditionsHold(tx: DbOrTx, task: Task, conditions: AutomationCondition[]) {
+export async function conditionsHold(tx: DbOrTx, task: Task, conditions: AutomationCondition[]) {
   for (const c of conditions) {
     let actual: boolean;
     if (c.field === "priority") actual = task.priority === c.value;
     else if (c.field === "type") actual = task.type === c.value;
     else if (c.field === "assignee") actual = (task.assigneeId ?? null) === (c.value ?? null);
     else if (c.field === "team") actual = (task.teamId ?? null) === (c.value ?? null);
+    else if (c.field === "status") actual = task.columnId === c.value;
     else {
       const [hit] = await tx.select({ id: taskTags.tagId }).from(taskTags).where(and(eq(taskTags.taskId, task.id), eq(taskTags.tagId, c.value ?? ""))).limit(1);
       actual = !!hit;
@@ -254,6 +277,20 @@ export async function runAutomations(
   for (const rule of rules) {
     if (!triggerMatches(rule.trigger, change)) continue;
     if (!(await conditionsHold(tx, task, rule.conditions))) continue;
+    task = await applyRule(tx, organizationId, actorId, rule, task, ctx);
+  }
+  return task;
+}
+
+export type RuleContext = { today: string; notified: Set<string>; commented?: Set<string>; tagged?: Set<string> };
+
+/**
+ * Apply one rule's actions to one task, record the run, return the task as it ends up.
+ * Shared by instant rules (a person's change) and scheduled rules (actorId = null).
+ */
+export async function applyRule(tx: DbOrTx, organizationId: string, actorId: string | null, rule: typeof automations.$inferSelect, start: Task, ctx: RuleContext): Promise<Task> {
+  let task = start;
+  {
     const done: string[] = [];
     let failure: string | null = null;
     const patch: Partial<Task> = {};
@@ -268,6 +305,7 @@ export async function runAutomations(
         patch.position = (last?.position ?? 0) + POSITION_STEP;
         done.push(`moved to ${col.title}`);
       } else if (a.type === "set_assignee") {
+        if (a.userId === "actor" && !actorId) { failure = "a scheduled rule has no person who made the change"; break; }
         const target = a.userId === "actor" ? actorId : a.userId;
         if (target) {
           const [m] = await tx.select({ id: orgMembers.userId }).from(orgMembers).where(and(eq(orgMembers.organizationId, organizationId), eq(orgMembers.userId, target))).limit(1);
@@ -341,7 +379,7 @@ export async function runAutomations(
     await tx.update(automations).set({ runCount: sql`${automations.runCount} + 1`, lastRunAt: new Date() }).where(eq(automations.id, rule.id));
     if (!failure && done.length) {
       await tx.insert(auditLogs).values({
-        organizationId, actorId, action: "AUTOMATION_RAN", entityType: "task", entityId: task.id, metadata: { automation: rule.name, did: done },
+        organizationId, actorId, action: "AUTOMATION_RAN", entityType: "task", entityId: task.id, metadata: { automation: rule.name, did: done, scheduled: !actorId },
       });
     }
   }

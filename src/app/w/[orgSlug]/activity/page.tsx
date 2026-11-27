@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { loadWorkspace } from "@/server/page-guards";
 import { AUDIT_ACTIONS, listAuditLogs, listMembers, taskRefs } from "@/server/services/workspace";
 import { Card, PageHeader } from "@/components/ui/card";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -92,7 +93,7 @@ export default async function ActivityPage({
   return (
     <main className="w-full px-10 py-10 2xl:px-14">
       <PageHeader
-        eyebrow={org.name}
+        eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Activity" }]} />}
         title="Activity"
         description="Everything that happened in this workspace, newest first."
         actions={<ActivityFilters

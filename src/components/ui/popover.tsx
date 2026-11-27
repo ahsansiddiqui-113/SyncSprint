@@ -9,14 +9,22 @@ export function Popover({
   children,
   align = "left",
   className,
+  onOpenChange,
 }: {
   trigger: (open: boolean) => React.ReactNode;
   children: React.ReactNode;
   align?: "left" | "right";
   className?: string;
+  /** Called after the popover opens or closes (load data here, never in trigger). */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const cb = useRef(onOpenChange);
+  cb.current = onOpenChange;
+  useEffect(() => {
+    cb.current?.(open);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;

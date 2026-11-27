@@ -1,11 +1,12 @@
 import "dotenv/config";
-import { watch } from "node:fs";
+import { watch, watchFile } from "node:fs";
 import { createServer } from "node:http";
 import next from "next";
 import { closeDb, db } from "@/db";
 import { MIGRATIONS_FOLDER, runMigrations } from "@/db/migrate";
 import { createWsUpgradeHandler } from "@/server/ws-server";
 import { startPostgresFanout } from "@/server/realtime-postgres";
+import { runScheduler } from "@/server/scheduler-runner";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT ?? 3000);
@@ -18,6 +19,12 @@ async function main() {
 
   const app = next({ dev, port });
   await app.prepare();
+
+  // Scheduled automations (due soon, overdue, on a schedule): check every minute.
+  // A database lease keeps several servers from running it at the same time.
+  const tick = () => void runScheduler(db).catch((err) => console.error("[scheduler] run failed", err));
+  setInterval(tick, 60_000).unref();
+  setTimeout(tick, 5_000).unref();
   const handle = app.getRequestHandler();
   const nextUpgrade = app.getUpgradeHandler();
   const wsUpgrade = createWsUpgradeHandler([appUrl, `http://localhost:${port}`, `http://127.0.0.1:${port}`]);
@@ -53,8 +60,10 @@ ${signal} received — shutting down…`);
     watch("src/db/schema.ts", () =>
       console.warn("\n⚠ src/db/schema.ts changed: restart the dev server (Ctrl+C, then npm run dev) so every part of the app uses the new schema.\n")
     );
+    // The journal is written last when a migration is added; poll it (fs.watch misses copies on Windows).
     let timer: ReturnType<typeof setTimeout> | undefined;
-    watch(MIGRATIONS_FOLDER, { recursive: true }, () => {
+    watchFile(`${MIGRATIONS_FOLDER}/meta/_journal.json`, { interval: 2000 }, (cur, prev) => {
+      if (cur.mtimeMs === prev.mtimeMs) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
         runMigrations(db)

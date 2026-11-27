@@ -3,6 +3,7 @@ import { isAdminRole } from "@/lib/rbac-shared";
 import { loadWorkspace } from "@/server/page-guards";
 import { listProjects } from "@/server/services/workspace";
 import { Card, PageHeader } from "@/components/ui/card";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { ShareLinksManager } from "@/components/workspace/share-links";
 
 export const metadata = { title: "Share links" };
@@ -14,7 +15,7 @@ export default async function SharingPage({ params }: { params: Promise<{ orgSlu
   return (
     <main className="w-full px-10 py-10 2xl:px-14">
       <PageHeader
-        eyebrow={org.name}
+        eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Settings" }, { label: "Share links" }]} />}
         title="Share links"
         description="Read-only links for people without an account, like clients or stakeholders. They can view, never change anything."
       />

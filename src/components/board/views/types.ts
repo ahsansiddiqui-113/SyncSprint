@@ -23,5 +23,5 @@ export type ViewProps = {
   allTasks: Record<string, TaskDTO>;
 };
 
-export const VIEWS = ["board", "list", "table", "sprints", "calendar", "timeline", "workload", "dashboard"] as const;
+export const VIEWS = ["board", "list", "table", "sprints", "calendar", "timeline", "workload", "dashboard", "whiteboards"] as const;
 export type ViewId = (typeof VIEWS)[number];

@@ -4,12 +4,13 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Activity, Building2, ChevronsUpDown, CreditCard, FileText, Goal, Home, Inbox, Link2, LogOut, Plug, Plus, ShieldCheck, Users, UsersRound } from "lucide-react";
+import { Activity, Briefcase, Building2, ChevronsUpDown, CreditCard, FileText, Goal, Home, Inbox, Link2, Lock, LogOut, Plug, Plus, Search, Settings, ShieldCheck, Users, UsersRound } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { isAdminRole } from "@/lib/rbac-shared";
 import { switchDemoRoleAction } from "@/actions/demo.actions";
+import { OPEN_PALETTE } from "./command-palette";
 import { Avatar } from "@/components/ui/avatar";
 import { RoleBadge } from "@/components/ui/badge";
 import { Logo } from "@/components/ui/card";
@@ -39,22 +40,26 @@ export function Sidebar({
   const base = `/w/${org.slug}`;
   const unread = useUnreadCount(org.id, user.id);
 
-  const nav = [
+  // Guests only see the projects shared with them (everything else refuses them anyway).
+  const guest = role === "guest";
+  const nav = guest ? [{ href: `${base}/guest`, label: "Shared with you", icon: Home, active: path.endsWith("/guest"), badge: 0 }] : [
     { href: base, label: "Home", icon: Home, active: path === base },
     { href: `${base}/inbox`, label: "Inbox", icon: Inbox, active: path.endsWith("/inbox"), badge: unread },
     { href: `${base}/docs`, label: "Docs", icon: FileText, active: path.includes("/docs") },
+    { href: `${base}/portfolio`, label: "Portfolio", icon: Briefcase, active: path.endsWith("/portfolio") },
     { href: `${base}/goals`, label: "Goals", icon: Goal, active: path.endsWith("/goals") },
     { href: `${base}/groups`, label: "Groups", icon: UsersRound, active: path.includes("/groups") },
     { href: `${base}/activity`, label: "Activity", icon: Activity, active: path.endsWith("/activity") },
   ];
   const admin = isAdminRole(role);
-  const settings = [
+  const settings = guest ? [] : [
     { href: `${base}/settings/members`, label: "Members", icon: Users, active: path.endsWith("/settings/members") },
     ...(admin
       ? [
           { href: `${base}/settings/billing`, label: "Billing & plan", icon: CreditCard, active: path.endsWith("/settings/billing") },
           { href: `${base}/settings/sharing`, label: "Share links", icon: Link2, active: path.endsWith("/settings/sharing") },
           { href: `${base}/settings/integrations`, label: "Integrations", icon: Plug, active: path.endsWith("/settings/integrations") },
+          { href: `${base}/settings/security`, label: "Security", icon: Lock, active: path.endsWith("/settings/security") },
         ]
       : []),
   ];
@@ -88,6 +93,16 @@ export function Sidebar({
 
       <TimerPill org={org} />
 
+      <div className={cn("px-3 pt-3", guest && "hidden")}>
+        <button
+          onClick={() => window.dispatchEvent(new Event(OPEN_PALETTE))}
+          className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-border bg-white px-3 py-1.5 text-[14px] text-subtle transition-colors hover:border-border-strong hover:text-foreground"
+        >
+          <Search className="h-4 w-4" /> <span className="flex-1 text-left">Search…</span>
+          <kbd className="rounded border border-border px-1 text-[11px]">Ctrl K</kbd>
+        </button>
+      </div>
+
       <nav className="space-y-0.5 px-3 pt-3">
         {nav.map((i) => (
           <Link
@@ -110,7 +125,7 @@ export function Sidebar({
       </nav>
 
       <nav aria-label="Workspace settings" className="mt-3 space-y-0.5 px-3">
-        <div className="px-3 pb-1 text-[13px] font-semibold text-subtle">Workspace</div>
+        {settings.length > 0 && <div className="px-3 pb-1 text-[13px] font-semibold text-subtle">Workspace</div>}
         {settings.map((i) => (
           <Link
             key={i.href}
@@ -134,13 +149,15 @@ export function Sidebar({
       <div className="mt-5 flex-1 overflow-y-auto px-3">
         <div className="mb-1 flex items-center justify-between px-3 text-[13px] font-semibold text-subtle">
           Spaces
-          <Link href={base} title="New project" className="rounded p-0.5 hover:bg-hover hover:text-foreground">
-            <Plus className="h-4 w-4" />
-          </Link>
+          {!guest && (
+            <Link href={base} title="New project" className="rounded p-0.5 hover:bg-hover hover:text-foreground">
+              <Plus className="h-4 w-4" />
+            </Link>
+          )}
         </div>
         <div className="space-y-0.5">
           {projects.map((p, i) => {
-            const href = `${base}/projects/${p.key}`;
+            const href = guest ? `${base}/guest/${p.key}` : `${base}/projects/${p.key}`;
             const active = path === href;
             const color = SPACE_COLORS[i % SPACE_COLORS.length];
             return (
@@ -205,6 +222,9 @@ export function Sidebar({
             </div>
             <div className="truncate text-[13px] text-subtle">{user.email}</div>
           </div>
+          <Link href="/account/security" title="Your account: sign-in, security, notifications" aria-label="Account settings" className="rounded-md p-1.5 text-subtle transition-colors hover:bg-hover hover:text-foreground">
+            <Settings className="h-4 w-4" />
+          </Link>
           <button
             title="Sign out"
             className="cursor-pointer rounded-md p-1.5 text-subtle transition-colors hover:bg-hover hover:text-foreground"

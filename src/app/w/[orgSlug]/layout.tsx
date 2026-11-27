@@ -6,7 +6,9 @@ import { isAdminRole } from "@/lib/rbac-shared";
 import { cn } from "@/lib/utils";
 import { loadWorkspaceAnyState } from "@/server/page-guards";
 import { listMyOrganizations, listProjects } from "@/server/services/workspace";
+import { guestProjects } from "@/server/services/guests";
 import { Sidebar } from "@/components/workspace/sidebar";
+import { CommandPalette } from "@/components/workspace/command-palette";
 
 export default async function WorkspaceLayout({
   children,
@@ -17,7 +19,11 @@ export default async function WorkspaceLayout({
 }) {
   const { orgSlug } = await params;
   const { user, org, role, billing, viaSupport } = await loadWorkspaceAnyState(orgSlug);
-  const [orgs, { projects }] = await Promise.all([listMyOrganizations(db, user.id), listProjects(db, user.id, orgSlug)]);
+  const guest = role === "guest";
+  const [orgs, projects] = await Promise.all([
+    listMyOrganizations(db, user.id),
+    guest ? guestProjects(db, user.id, org.id).then((ps) => ps.map((p) => ({ ...p, taskCount: 0 }))) : listProjects(db, user.id, orgSlug).then((r) => r.projects),
+  ]);
   const admin = isAdminRole(role) && !viaSupport;
   const tone = billing.access === "full" ? "amber" : "rose";
 
@@ -60,6 +66,7 @@ export default async function WorkspaceLayout({
           </div>
         )}
         <div className="relative min-h-0 flex-1 overflow-y-auto">{children}</div>
+        {!guest && <CommandPalette org={{ id: org.id, slug: org.slug }} projects={projects.map((p) => ({ key: p.key, name: p.name }))} admin={admin} />}
       </div>
     </div>
   );

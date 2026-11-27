@@ -105,6 +105,7 @@ export function CustomizePanel({
                 pending={pending}
                 onRename={(title) => run(() => updateStatusAction(organizationId, c.id, { title }), "Status renamed")}
                 onColor={(color) => run(() => updateStatusAction(organizationId, c.id, { color }))}
+                onWip={(wipLimit) => run(() => updateStatusAction(organizationId, c.id, { wipLimit }), wipLimit ? `WIP limit set to ${wipLimit}` : "WIP limit removed")}
                 onMove={(dir) => run(() => moveStatusAction(organizationId, c.id, dir))}
                 onDelete={() => {
                   setDeleting(c);
@@ -230,10 +231,17 @@ function StatusRow(props: {
   pending: boolean;
   onRename: (t: string) => void;
   onColor: (c: string) => void;
+  onWip: (n: number | null) => void;
   onMove: (dir: "left" | "right") => void;
   onDelete: () => void;
 }) {
   const [title, setTitle] = useState(props.column.title);
+  const [wip, setWip] = useState(props.column.wipLimit ? String(props.column.wipLimit) : "");
+  const saveWip = () => {
+    const n = wip.trim() ? Math.round(Number(wip)) : null;
+    if (n !== null && (!Number.isFinite(n) || n < 1)) return setWip(props.column.wipLimit ? String(props.column.wipLimit) : "");
+    if (n !== (props.column.wipLimit ?? null)) props.onWip(n);
+  };
   return (
     <div className="flex items-center gap-2 px-3 py-2">
       <ColorPicker value={props.color} onChange={props.onColor} />
@@ -246,6 +254,19 @@ function StatusRow(props: {
         onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
         className="h-8 min-w-0 flex-1 rounded-md border border-transparent px-2 text-[15px] font-medium outline-none hover:border-border-strong focus:border-primary"
       />
+      {!props.isDone && (
+        <input
+          value={wip}
+          inputMode="numeric"
+          aria-label={`Work-in-progress limit for ${props.column.title}`}
+          title="Work-in-progress limit (empty = none). Going over it warns, never blocks."
+          placeholder="WIP"
+          onChange={(e) => setWip(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+          onBlur={saveWip}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          className="h-8 w-14 rounded-md border border-border px-2 text-center text-[13.5px] outline-none focus:border-primary"
+        />
+      )}
       {props.isDone ? (
         <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[12.5px] font-semibold text-emerald-700"><Lock className="h-3.5 w-3.5" /> Done</span>
       ) : (

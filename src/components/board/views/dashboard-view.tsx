@@ -1,5 +1,6 @@
 "use client";
 
+import { FlowAnalytics } from "./flow-analytics";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Layers, ListChecks, Table2, BarChart3 } from "lucide-react";
 import type { TaskPriority } from "@/db/schema";
@@ -19,11 +20,11 @@ const SINGLE = "#8a5cf6"; // single-series magnitude color (validated status slo
 const CREATED = STATUS_SLOTS[0]; // validated pair: #3f7cb8 / #0f9d74
 const COMPLETED = DONE_COLOR;
 
-type Tip = { x: number; y: number; lines: React.ReactNode } | null;
+export type Tip = { x: number; y: number; lines: React.ReactNode } | null;
 
 /* --------------------------------- shell -------------------------------- */
 
-function ChartCard({
+export function ChartCard({
   title,
   subtitle,
   legend,
@@ -88,7 +89,7 @@ function ChartCard({
   );
 }
 
-function DataTable({ head, rows }: { head: string[]; rows: (string | number)[][] }) {
+export function DataTable({ head, rows }: { head: string[]; rows: (string | number)[][] }) {
   return (
     <table className="w-full text-[14px]">
       <thead>
@@ -411,6 +412,8 @@ export function DashboardView(props: ViewProps & { organizationId: string; proje
           </div>
         )}
       </section>
+
+      <FlowAnalytics organizationId={props.organizationId} projectId={props.projectId} colorOf={props.colorOf} versionKey={versionKey} />
     </div>
   );
 }

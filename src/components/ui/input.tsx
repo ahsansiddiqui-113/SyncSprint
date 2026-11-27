@@ -16,5 +16,5 @@ export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLS
 }
 
 export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {
-  return <label className={cn("text-[14px] font-medium text-muted", className)} {...props} />;
+  return <label className={cn("block text-[14px] font-medium text-muted", className)} {...props} />;
 }

@@ -6,6 +6,7 @@ import { timeAgo } from "@/lib/utils";
 import { loadWorkspace } from "@/server/page-guards";
 import { listDocs } from "@/server/services/docs";
 import { Card, PageHeader } from "@/components/ui/card";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { NewDocButton } from "@/components/docs/new-doc-button";
 
 export const metadata = { title: "Docs" };
@@ -27,7 +28,7 @@ export default async function DocsPage({ params, searchParams }: { params: Promi
   return (
     <main className="w-full px-10 py-10 2xl:px-14">
       <PageHeader
-        eyebrow={org.name}
+        eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Docs" }]} />}
         title="Docs"
         description="Specs, runbooks, meeting notes and decisions — written in markdown and linked to the work they describe."
         actions={can(role, "CREATE_OR_MOVE_TASK") ? <NewDocButton organizationId={org.id} orgSlug={org.slug} /> : null}

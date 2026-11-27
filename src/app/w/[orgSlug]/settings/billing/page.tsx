@@ -3,6 +3,7 @@ import { isAdminRole } from "@/lib/rbac-shared";
 import { loadWorkspaceAnyState } from "@/server/page-guards";
 import { getBillingOverview } from "@/server/services/billing";
 import { Card, PageHeader } from "@/components/ui/card";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { BillingPanel } from "@/components/workspace/billing-panel";
 
 export const metadata = { title: "Billing & plan" };
@@ -14,7 +15,7 @@ export default async function BillingPage({ params, searchParams }: { params: Pr
   if (!isAdminRole(role) || viaSupport) {
     return (
       <main className="w-full px-10 py-10 2xl:px-14">
-        <PageHeader eyebrow={org.name} title="Billing & plan" />
+        <PageHeader eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Settings" }, { label: "Billing & plan" }]} />} title="Billing & plan" />
         <Card className="p-8 text-center text-[15px] text-muted">Only this workspace&apos;s admins can see and change billing.</Card>
       </main>
     );
@@ -22,7 +23,7 @@ export default async function BillingPage({ params, searchParams }: { params: Pr
   const o = await getBillingOverview(db, user.id, org.id);
   return (
     <main className="w-full px-10 py-10 2xl:px-14">
-      <PageHeader eyebrow={org.name} title="Billing & plan" description="Your plan, seats and payments. Viewers are always free." />
+      <PageHeader eyebrow={<Breadcrumbs items={[{ label: org.name, href: `/w/${org.slug}` }, { label: "Settings" }, { label: "Billing & plan" }]} />} title="Billing & plan" description="Your plan, seats and payments. Viewers are always free." />
       <BillingPanel
         organizationId={org.id}
         orgSlug={org.slug}

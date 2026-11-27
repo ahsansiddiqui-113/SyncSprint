@@ -49,8 +49,18 @@ const PHASES: { name: string; status: Status; items: string[] }[] = [
   },
   {
     name: "Visual planning",
-    status: "next",
+    status: "shipped",
     items: ["Whiteboards and mind maps", "Gantt baselines and critical path", "Portfolio view across projects", "Scheduled automations"],
+  },
+  {
+    name: "Enterprise & reach",
+    status: "shipped",
+    items: ["Single sign-on, two-step sign-in and user provisioning", "Project and task templates, Ctrl+K search", "WIP limits, swimlanes, flow analytics, intake forms", "Slack, Teams, Discord, email, push, calendar, WhatsApp", "GitHub and GitLab links, guest access for clients"],
+  },
+  {
+    name: "Deeper integrations",
+    status: "next",
+    items: ["Two-way Slack and Teams apps", "Custom roles", "Native mobile apps", "More languages"],
   },
 ];
 

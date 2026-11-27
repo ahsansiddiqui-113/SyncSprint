@@ -54,7 +54,7 @@ export type OrgEvent =
   | { type: "COLUMN_REBALANCED"; columnId: string; positions: Record<string, number> }
   | { type: "COMMENT_ADDED"; actor: Actor; taskId: string; commentId: string }
   /** Checklist / tag / dependency changes: clients refetch the project's meta. */
-  | { type: "TASK_META_CHANGED"; actor: Actor; projectId: string; taskIds: string[]; kind: "checklist" | "tags" | "dependencies" | "fields" | "people" }
+  | { type: "TASK_META_CHANGED"; actor: Actor; projectId: string; taskIds: string[]; kind: "checklist" | "tags" | "dependencies" | "fields" | "people" | "dev" }
   /** Sprint created / started / completed / edited / deleted: clients refetch the sprint list. */
   | { type: "SPRINTS_CHANGED"; actor: Actor; projectId: string }
   /** Statuses or custom fields changed: clients refresh the project definition. */
@@ -68,7 +68,11 @@ export type OrgEvent =
   | { type: "TIME_CHANGED"; actor: Actor; projectId: string; taskId: string; userId: string }
   | { type: "ATTACHMENTS_CHANGED"; actor: Actor; projectId: string; taskId: string }
   | { type: "DOCS_CHANGED"; actor: Actor; docId: string; version: number | null }
-  | { type: "GOALS_CHANGED"; actor: Actor };
+  | { type: "GOALS_CHANGED"; actor: Actor }
+  /** A whiteboard / mind map (or the board list) changed: open copies refetch if their revision is older. */
+  | { type: "WHITEBOARD_CHANGED"; actor: Actor; projectId: string; boardId: string; revision: number | null }
+  /** Baseline saved/deleted or a project status update posted. */
+  | { type: "PLANNING_CHANGED"; actor: Actor; projectId: string };
 
 export type ServerMessage =
   | { type: "WELCOME"; connectionId: string; userId: string }

@@ -20,7 +20,7 @@ import { assertSeatAvailable } from "./billing";
 import { hasRole, requireOrgBySlug, requireOrgPermission } from "@/lib/rbac";
 
 /** Roles that can be granted. ("owner" is a legacy alias of admin and can't be assigned.) */
-export const roleSchema = z.enum(["admin", "member", "viewer"]);
+export const roleSchema = z.enum(["admin", "member", "viewer", "guest"]);
 export const DEFAULT_COLUMNS = ["Backlog", "In Progress", "Review", "Done"] as const;
 
 export function slugify(input: string) {

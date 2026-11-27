@@ -1,8 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { PresentationIcon } from "lucide-react";
+import { WhiteboardsView } from "./views/whiteboards-view";
+import { TaskTemplatesButton, saveProjectTemplateFlow } from "./templates-menu";
+import { BookmarkPlus, ClipboardList } from "lucide-react";
+import { FormsPanel } from "./forms-panel";
+import { EmailToTask } from "./email-to-task";
+import { Mail } from "lucide-react";
 import { ArrowDownUp, CalendarDays, ChartGantt, ChevronRight, Eye, Gauge, Kanban, LayoutDashboard, List as ListIcon, Link2, MoreHorizontal, Plus, Rocket, Settings2, Shuffle, Sparkles, Table2, Zap } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import type { OrgEvent, PresenceUser, TaskDTO } from "@/lib/realtime-protocol";
@@ -50,7 +58,7 @@ import type { SavedViewConfig } from "@/db/schema";
 import { VIEWS, type TaskPatch, type ViewId, type ViewProps } from "./views/types";
 
 export type Member = { id: string; name: string; avatarUrl: string | null; role: OrgRole };
-export type Column = { id: string; title: string; color?: string | null };
+export type Column = { id: string; title: string; color?: string | null; wipLimit?: number | null };
 export type BoardCtx = {
   org: { id: string; slug: string; name: string; isDemo: boolean };
   project: { id: string; key: string; name: string };
@@ -72,6 +80,7 @@ const VIEW_META: Record<ViewId, { label: string; icon: typeof Kanban }> = {
   timeline: { label: "Timeline", icon: ChartGantt },
   workload: { label: "Workload", icon: Gauge },
   dashboard: { label: "Dashboard", icon: LayoutDashboard },
+  whiteboards: { label: "Whiteboards", icon: PresentationIcon },
 };
 
 /**
@@ -112,6 +121,8 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   const [showCustomize, setShowCustomize] = useState(false);
   const [showAutomations, setShowAutomations] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showForms, setShowForms] = useState(false);
+  const [showEmail, setShowEmail] = useState(false);
   const [showShare, setShowShare] = useState(false);
   /** Bumped on anything that changes workload (task edits, co-assignees, capacity settings). */
   const [workloadKey, setWorkloadKey] = useState(0);
@@ -294,7 +305,14 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
   }
 
   /** Optimistic move → version-checked server write → rollback + explanation on conflict. */
-  async function commitMove(task: TaskDTO, columnId: string, position: number) {
+  async function commitMove(task: TaskDTO, columnId: string, position: number, lanePatch?: TaskPatch) {
+    // Swimlane drop: a different row means a field change (assignee / priority / type) too.
+    if (lanePatch && Object.keys(lanePatch).length) {
+      if (task.columnId === columnId && task.position === position) return commitPatch(task, lanePatch);
+      const moved = await commitMove(task, columnId, position);
+      if (moved) await commitPatch(moved, lanePatch);
+      return;
+    }
     dispatch({ type: "optimisticMove", taskId: task.id, columnId, position });
     ownWrites.current.add(`${task.id}:${task.version + 1}`);
     const res = await moveTaskAction({ organizationId: org.id, taskId: task.id, targetColumnId: columnId, newPosition: position, expectedVersion: task.version }, todayISO());
@@ -306,6 +324,7 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
     if (res.conflict) return handleConflict(task, res.current);
     dispatch({ type: "server", task: res.task });
     if (res.rebalanced) dispatch({ type: "rebalance", positions: res.rebalanced });
+    return res.task;
   }
 
   /** Complete <-> reopen: moves the task to the end of the done (or first) column. */
@@ -393,9 +412,11 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
             </span>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 text-[13px] text-subtle">
-                <span>{org.name}</span>
+                <Link href={`/w/${org.slug}`} className="hover:text-foreground hover:underline">{org.name}</Link>
                 <ChevronRight className="h-3.5 w-3.5" />
-                <span>{project.key}</span>
+                <Link href={`/w/${org.slug}`} className="hover:text-foreground hover:underline">Projects</Link>
+                <ChevronRight className="h-3.5 w-3.5" />
+                <span aria-current="page">{project.key}</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <h1 className="truncate text-[22px] font-bold leading-tight tracking-tight">{project.name}</h1>
@@ -438,6 +459,16 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
                 </Button>
               )}
             >
+              {canEdit && (
+                <button onClick={() => setShowForms(true)} className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[15px] hover:bg-hover">
+                  <ClipboardList className="h-4 w-4 text-subtle" /> Forms (public intake)
+                </button>
+              )}
+              {canEdit && (
+                <button onClick={() => setShowEmail(true)} className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[15px] hover:bg-hover">
+                  <Mail className="h-4 w-4 text-subtle" /> Email to task
+                </button>
+              )}
               <button onClick={() => setShowImport(true)} className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[15px] hover:bg-hover">
                 <ArrowDownUp className="h-4 w-4 text-subtle" /> Import & export CSV
               </button>
@@ -446,10 +477,18 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
                   <Link2 className="h-4 w-4 text-subtle" /> Share read-only link
                 </button>
               )}
+              {isAdminRole(role) && (
+                <button onClick={() => void saveProjectTemplateFlow(org.id, project.id, project.name)} className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[15px] hover:bg-hover">
+                  <BookmarkPlus className="h-4 w-4 text-subtle" /> Save project as template
+                </button>
+              )}
             </Popover>
             <Button variant="ai" size="sm" onClick={() => setShowDigest(true)}>
               <Sparkles className="h-4 w-4" /> AI standup
             </Button>
+            {canEdit && (
+              <TaskTemplatesButton organizationId={org.id} projectId={project.id} meId={me.id} isAdmin={isAdminRole(role)} onCreated={(id) => setTimeout(() => setOpenTaskId(id), 300)} />
+            )}
             {canEdit && (
               <Button size="sm" onClick={() => setNewTask({})}>
                 <Plus className="h-4 w-4" /> Add Task
@@ -545,7 +584,19 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
         />
       )}
       {view === "calendar" && <CalendarView {...viewProps} onPatch={commitPatch} />}
-      {view === "timeline" && <TimelineView {...viewProps} onPatch={commitPatch} />}
+      {view === "timeline" && <TimelineView {...viewProps} onPatch={commitPatch} organizationId={org.id} projectId={project.id} canBaseline={isAdminRole(role)} />}
+      {view === "whiteboards" && (
+        <WhiteboardsView
+          organizationId={org.id}
+          projectId={project.id}
+          me={me}
+          canEdit={canEdit}
+          isAdmin={isAdminRole(role)}
+          allTasks={state.tasks}
+          refOf={refOf}
+          onOpen={setOpenTaskId}
+        />
+      )}
       {view === "dashboard" && <DashboardView {...viewProps} organizationId={org.id} projectId={project.id} filtered={visible !== state.tasks} />}
 
       {openTask && (
@@ -622,6 +673,10 @@ export function KanbanBoard(props: BoardCtx & { initialTasks: TaskDTO[] }) {
             router.refresh();
           }}
         />
+      )}
+      {showEmail && <EmailToTask organizationId={org.id} projectId={project.id} isAdmin={isAdminRole(role)} onClose={() => setShowEmail(false)} />}
+      {showForms && (
+        <FormsPanel organizationId={org.id} projectId={project.id} columns={columns} members={members} meta={meta} baseUrl={window.location.origin} onClose={() => setShowForms(false)} />
       )}
       {showCustomize && (
         <CustomizePanel

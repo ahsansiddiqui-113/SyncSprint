@@ -95,8 +95,9 @@ export async function addStatus(conn: DB, actorId: string, organizationId: strin
   });
 }
 
-export async function updateStatus(conn: DB, actorId: string, organizationId: string, columnId: string, raw: { title?: string; color?: string | null }) {
-  const patch: { title?: string; color?: string | null } = {};
+export async function updateStatus(conn: DB, actorId: string, organizationId: string, columnId: string, raw: { title?: string; color?: string | null; wipLimit?: number | null }) {
+  const patch: { title?: string; color?: string | null; wipLimit?: number | null } = {};
+  if (raw.wipLimit !== undefined) patch.wipLimit = raw.wipLimit === null ? null : z.number().int().min(1, "A WIP limit is at least 1").max(999).parse(raw.wipLimit);
   if (raw.title !== undefined) patch.title = statusTitle.parse(raw.title);
   if (raw.color !== undefined) patch.color = raw.color === null ? null : colorSchema.parse(raw.color);
   await requireOrgPermission(actorId, organizationId, "admin", conn);
@@ -339,7 +340,7 @@ export async function setWatching(conn: DB, actorId: string, organizationId: str
 /* ------------------------------- saved views ------------------------------- */
 
 const viewConfig = z.object({
-  view: z.enum(["board", "list", "table", "sprints", "calendar", "timeline", "dashboard", "workload"]),
+  view: z.enum(["board", "list", "table", "sprints", "calendar", "timeline", "dashboard", "workload", "whiteboards"]),
   filters: z.record(z.string(), z.unknown()),
   sort: z.object({ key: z.string().max(60), dir: z.enum(["asc", "desc"]) }).nullish(),
   groupBy: z.string().max(60).nullish(),
