@@ -5,6 +5,7 @@ import { twoFactor } from "better-auth/plugins";
 import { APIError } from "better-auth/api";
 import { sso } from "@better-auth/sso";
 import { ssoProvisionUser, ssoRequiredFor, ssoTrustedOrigins } from "@/server/services/sso-hooks";
+import { linkTrustedProviders } from "@/server/services/account-linking";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { appBaseUrl } from "./base-url";
@@ -69,6 +70,9 @@ export const auth = betterAuth({
       },
     },
   },
+  // Attaching Google/Microsoft to an existing account: Google links on its verified email; Microsoft only
+  // through an explicit "Connect Microsoft" by the signed-in owner (see linkTrustedProviders).
+  account: { accountLinking: { enabled: true, trustedProviders: (request) => linkTrustedProviders(request) } },
   session: { expiresIn: 60 * 60 * 24 * 7, cookieCache: { enabled: true, maxAge: 60 } },
   advanced: { database: { generateId: "uuid" } },
   plugins: [
