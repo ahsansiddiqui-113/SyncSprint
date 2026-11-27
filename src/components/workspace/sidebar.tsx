@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Activity, Briefcase, Building2, ChevronsUpDown, CreditCard, FileText, Goal, Home, Inbox, Link2, Lock, LogOut, Plug, Plus, Search, Settings, ShieldCheck, Users, UsersRound } from "lucide-react";
+import { Activity, Briefcase, Building2, ChevronsUpDown, CircleHelp, CreditCard, FileText, Goal, Home, Inbox, Link2, Lock, LogOut, Plug, Plus, Search, Settings, ShieldCheck, Users, UsersRound } from "lucide-react";
 import type { OrgRole } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -213,6 +213,11 @@ export function Sidebar({
           </div>
         )}
 
+        {!guest && (
+          <Link href="/how-it-works" className="flex items-center gap-3 rounded-lg px-3 py-1.5 text-[14.5px] font-medium text-muted transition-colors hover:bg-hover hover:text-foreground">
+            <CircleHelp className="h-[17px] w-[17px]" /> How it works
+          </Link>
+        )}
         <div className="flex items-center gap-3 rounded-lg px-1.5 py-1">
           <Avatar id={user.id} name={user.name} src={user.image} size={34} />
           <div className="min-w-0 flex-1">

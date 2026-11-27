@@ -198,6 +198,9 @@ export default async function Home() {
           <div className="mx-auto mb-12 max-w-2xl text-center">
             <p className="text-[14px] font-bold uppercase tracking-wider text-primary">How it works</p>
             <h2 className="mt-2 text-4xl font-extrabold tracking-tight">From idea to done, without the chaos.</h2>
+            <Link href="/how-it-works" className={cn(buttonVariants({ variant: "outline" }), "mt-6")}>
+              ▶ Watch the full tour
+            </Link>
           </div>
           <div className="grid gap-5 lg:grid-cols-3">
             {STEPS.map((s, i) => (
