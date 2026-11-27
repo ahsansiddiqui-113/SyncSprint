@@ -16,7 +16,7 @@ export async function SiteHeader() {
         </Link>
         <div className="flex items-center gap-2">
           <Link href="/#features" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "hidden sm:inline-flex")}>Features</Link>
-          <Link href="/#how-it-works" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "hidden sm:inline-flex")}>How it works</Link>
+          <Link href="/how-it-works" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "hidden sm:inline-flex")}>How it works</Link>
           <Link href="/roadmap" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "hidden md:inline-flex")}>Roadmap</Link>
           {session ? (
             <Link href="/w" className={buttonVariants({ size: "sm" })}>

@@ -21,7 +21,7 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
       { label: "Live demo", href: "/#demo" },
       { label: "Create a workspace", href: "/sign-up" },
       { label: "Log in", href: "/sign-in" },
-      { label: "How it works", href: "/#how-it-works" },
+      { label: "How it works", href: "/how-it-works" },
     ],
   },
   {
