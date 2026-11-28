@@ -215,13 +215,21 @@ export async function seedDemoWorkspace(conn: DB, ownerUserId: string) {
         const est = Math.max(1, Math.round((t.storyPoints ?? 2) * 1.5 * 2) / 2);
         await tx.update(tasks).set({ estimateHours: est }).where(eq(tasks.id, t.id));
       }
-      // Alex is overloaded this week: a big task due in 2 days on top of their sprint work.
+      // Alex is overloaded this week: a big task due within 2 days on top of their sprint work.
+      // Kept inside this Monday–Friday so it shows in this week's Workload on any day: on a weekend
+      // "today + 2" would land all of it on next Monday, so use this week's Mon–Fri (now overdue,
+      // which piles onto today); on weekdays cap the due date at this Friday.
+      const thisMon = plus(nextMon, -7);
+      const thisFri = plus(thisMon, 4);
+      const weekend = (new Date().getUTCDay() + 6) % 7 >= 5;
+      const bigStart = weekend ? thisMon : day(0);
+      const bigDue = weekend ? thisFri : day(2) < thisFri ? day(2) : thisFri;
       const [counter] = await tx.update(projects).set({ taskCounter: sql`${projects.taskCounter} + 1` }).where(eq(projects.id, projectId)).returning({ n: projects.taskCounter });
       const [big] = await tx
         .insert(tasks)
         .values({
           organizationId: orgId, projectId, columnId: cols[1]!.id, taskNumber: counter!.n, title: "Migrate billing data to the new schema",
-          priority: "high", type: "story", assigneeId: alex!.id, estimateHours: 24, storyPoints: 8, startDate: day(0), dueDate: day(2),
+          priority: "high", type: "story", assigneeId: alex!.id, estimateHours: 24, storyPoints: 8, startDate: bigStart, dueDate: bigDue,
           position: 95 * POSITION_STEP, createdAt: minutesAgo(60 * 3), updatedAt: minutesAgo(60 * 3),
         })
         .returning();

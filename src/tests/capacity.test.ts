@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   addTimeOff,
   capacityWarnings,
@@ -268,4 +268,22 @@ describe("capacity: demo seed", () => {
     expect(priya.customized).toBe(true);
     expect(priya.totalCapacity).toBe(24);
   });
+});
+
+describe("capacity: demo seed on every day of the week", () => {
+  afterEach(() => vi.useRealTimers());
+  // A Monday-to-Sunday week: the demo's overloaded teammate must show in "this week" whichever day it's opened.
+  for (const iso of ["2026-11-30", "2026-12-01", "2026-12-02", "2026-12-03", "2026-12-04", "2026-12-05", "2026-12-06"]) {
+    it(`Alex is at or over capacity this week on ${iso}`, async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(`${iso}T10:00:00Z`));
+      const T2 = await makeTenant(`Week ${iso}`);
+      const { seedDemoWorkspace } = await import("@/server/services/demo");
+      const org = await seedDemoWorkspace(db, T2.owner.id);
+      const { people } = await getWorkload(db, T2.owner.id, org.id, weekOf(utcToday()));
+      const alex = people.find((p) => p.name === "Alex Rivera")!;
+      expect(["near", "over"]).toContain(alex.status);
+      expect(alex.totalLoad).toBeGreaterThanOrEqual(24);
+    });
+  }
 });
