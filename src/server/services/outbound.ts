@@ -41,10 +41,11 @@ export async function sendEmail(conn: DB, msg: { to: string; subject: string; te
       signal: AbortSignal.timeout(10_000),
     });
     const ok = res.ok;
-    await conn.insert(outbox).values({ channel: "email", to: msg.to, subject, body: null, status: ok ? "sent" : "failed", error: ok ? null : `HTTP ${res.status}` });
+    // The text is kept only in development, so links in sent or failed mail can still be followed locally.
+    await conn.insert(outbox).values({ channel: "email", to: msg.to, subject, body: isProd() ? null : msg.text.slice(0, 20_000), status: ok ? "sent" : "failed", error: ok ? null : `HTTP ${res.status}` });
     return ok ? ("sent" as const) : ("failed" as const);
   } catch (err) {
-    await conn.insert(outbox).values({ channel: "email", to: msg.to, subject, body: null, status: "failed", error: err instanceof Error ? err.message.slice(0, 500) : "error" });
+    await conn.insert(outbox).values({ channel: "email", to: msg.to, subject, body: isProd() ? null : msg.text.slice(0, 20_000), status: "failed", error: err instanceof Error ? err.message.slice(0, 500) : "error" });
     return "failed" as const;
   }
 }

@@ -17,6 +17,21 @@ export async function AuthPage({ mode }: { mode: "sign-in" | "sign-up" }) {
   // Offer "Sign in with your company" only once some workspace has verified SSO.
   const sso = await ssoAvailable();
   return (
+    <AuthShell>
+      <Suspense>
+        <AuthForm mode={mode} providers={{ google: isGoogleEnabled, microsoft: isMicrosoftEnabled, sso }} />
+      </Suspense>
+      <div className="flex w-full max-w-md items-center gap-3 text-[14px] text-subtle">
+        <span className="h-px flex-1 bg-border-strong" /> or just explore <span className="h-px flex-1 bg-border-strong" />
+      </div>
+      <DemoButton size="md" />
+    </AuthShell>
+  );
+}
+
+/** The two-panel frame shared by sign-in, sign-up, forgot and reset password. */
+export function AuthShell({ children }: { children: React.ReactNode }) {
+  return (
     <main className="grid min-h-screen bg-white lg:grid-cols-[1.05fr_1fr]">
       <div className="relative hidden flex-col justify-between overflow-hidden bg-linear-to-br from-[#7b68ee] via-[#8e5cf0] to-[#e44a8a] p-12 text-white lg:flex">
         <div className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-white/10 blur-2xl" />
@@ -40,13 +55,7 @@ export async function AuthPage({ mode }: { mode: "sign-in" | "sign-up" }) {
 
       <div className="flex flex-col items-center justify-center gap-8 bg-canvas px-6 py-12">
         <Link href="/" className="lg:hidden"><Logo /></Link>
-        <Suspense>
-          <AuthForm mode={mode} providers={{ google: isGoogleEnabled, microsoft: isMicrosoftEnabled, sso }} />
-        </Suspense>
-        <div className="flex w-full max-w-md items-center gap-3 text-[14px] text-subtle">
-          <span className="h-px flex-1 bg-border-strong" /> or just explore <span className="h-px flex-1 bg-border-strong" />
-        </div>
-        <DemoButton size="md" />
+        {children}
       </div>
     </main>
   );

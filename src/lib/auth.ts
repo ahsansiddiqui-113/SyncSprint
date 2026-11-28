@@ -6,6 +6,7 @@ import { APIError } from "better-auth/api";
 import { sso } from "@better-auth/sso";
 import { ssoProvisionUser, ssoRequiredFor, ssoTrustedOrigins } from "@/server/services/sso-hooks";
 import { linkTrustedProviders } from "@/server/services/account-linking";
+import { emailVerificationRequired, sendPasswordResetEmail, sendVerificationEmail } from "@/server/services/auth-emails";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { appBaseUrl } from "./base-url";
@@ -41,7 +42,29 @@ export const auth = betterAuth({
       isDemo: { type: "boolean", defaultValue: false, input: false },
     },
   },
-  emailAndPassword: { enabled: true, minPasswordLength: 8, autoSignIn: true },
+  emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 8,
+    autoSignIn: true,
+    // No session until the email is confirmed (see emailVerificationRequired for when this is on).
+    requireEmailVerification: emailVerificationRequired(),
+    // Forgot password: a one-time link, valid 1 hour; a reset signs the account out everywhere else.
+    resetPasswordTokenExpiresIn: 60 * 60,
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, url }) => {
+      await sendPasswordResetEmail(user, url);
+    },
+  },
+  emailVerification: {
+    sendOnSignUp: true,
+    // Signing in before confirming sends a fresh link (only while verification is required).
+    sendOnSignIn: true,
+    autoSignInAfterVerification: true,
+    expiresIn: 60 * 60 * 24,
+    sendVerificationEmail: async ({ user, url }) => {
+      await sendVerificationEmail(user, url);
+    },
+  },
   socialProviders: {
     ...(googleEnabled ? { google: { clientId: process.env.GOOGLE_CLIENT_ID!, clientSecret: process.env.GOOGLE_CLIENT_SECRET! } } : {}),
     ...(microsoftEnabled
@@ -93,4 +116,5 @@ export const auth = betterAuth({
 
 export const isGoogleEnabled = googleEnabled;
 export const isMicrosoftEnabled = microsoftEnabled;
+export const isEmailVerificationRequired = emailVerificationRequired();
 export type AuthSession = typeof auth.$Infer.Session;
