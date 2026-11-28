@@ -14,6 +14,10 @@ import {
 } from "@/server/services/automations";
 import { advanceDate, nextDates, setRecurrence } from "@/server/services/recurrence";
 import { newEffects } from "@/server/services/task-effects";
+import { addDays } from "@/lib/dates";
+
+// The engine only trusts a "today" within a day of the real date, so dated tests are relative to it.
+const TODAY = new Date().toISOString().slice(0, 10);
 import { getTask, makeTenant, testDb } from "./helpers";
 import type { DB } from "@/db";
 import type { Task } from "@/db/schema";
@@ -114,10 +118,10 @@ describe("automation engine", () => {
         { type: "set_due_in_days", days: 1 },
       ],
     });
-    const fx = newEffects("2026-11-26");
+    const fx = newEffects(TODAY);
     const hit = await newTask("Checkout down", { type: "bug", priority: "urgent" }, fx);
     expect(hit.columnId).toBe(col(1));
-    expect(hit.dueDate).toBe("2026-11-27");
+    expect(hit.dueDate).toBe(addDays(TODAY, 1));
     const miss = await newTask("Typo", { type: "bug", priority: "low" });
     expect(miss.columnId).toBe(col(0));
     await setAutomationEnabled(db, T.admin.id, T.org.id, rule.id, false);
@@ -182,7 +186,7 @@ describe("recurring tasks", () => {
 
   it("finishing a recurring task creates the next one with people, tags and an unchecked checklist", async () => {
     const tag = await createTag(db, T.admin.id, T.org.id, { name: "Ops", color: "#3f7cb8" });
-    const t = await newTask("Weekly report", { assigneeId: T.member.id, dueDate: "2026-11-26", startDate: "2026-11-24", estimateHours: 2 });
+    const t = await newTask("Weekly report", { assigneeId: T.member.id, dueDate: TODAY, startDate: addDays(TODAY, -2), estimateHours: 2 });
     await setTaskTag(db, T.member.id, T.org.id, t.id, tag.id, true);
     await setCoAssignees(db, T.member.id, T.org.id, t.id, [T.admin.id]);
     const item = await addChecklistItem(db, T.member.id, T.org.id, t.id, "Collect metrics");
@@ -191,11 +195,11 @@ describe("recurring tasks", () => {
     await expect(setRecurrence(db, T.viewer.id, T.org.id, t.id, { frequency: "weekly", interval: 1 })).rejects.toMatchObject({ code: "FORBIDDEN_REQUIRES_MEMBER" });
     await setRecurrence(db, T.member.id, T.org.id, t.id, { frequency: "weekly", interval: 1 });
 
-    const fx = newEffects("2026-11-26");
+    const fx = newEffects(TODAY);
     await move(t, DONE(), T.member.id, fx);
     expect(fx.created).toHaveLength(1);
     const next = fx.created[0]!;
-    expect(next).toMatchObject({ title: "Weekly report", columnId: col(0), assigneeId: T.member.id, dueDate: "2026-12-03", startDate: "2026-12-01", estimateHours: 2 });
+    expect(next).toMatchObject({ title: "Weekly report", columnId: col(0), assigneeId: T.member.id, dueDate: addDays(TODAY, 7), startDate: addDays(TODAY, 5), estimateHours: 2 });
     expect(next.taskNumber).toBeGreaterThan(t.taskNumber);
     expect(await db.select().from(taskTags).where(eq(taskTags.taskId, next.id))).toHaveLength(1);
     const items = await db.select().from(checklistItems).where(eq(checklistItems.taskId, next.id));
@@ -205,7 +209,7 @@ describe("recurring tasks", () => {
 
     // Re-opening and re-completing the old task doesn't duplicate (the rule moved on).
     await move(t, col(1));
-    const fx2 = newEffects("2026-11-26");
+    const fx2 = newEffects(TODAY);
     await move(t, DONE(), T.member.id, fx2);
     expect(fx2.created).toHaveLength(0);
   });
