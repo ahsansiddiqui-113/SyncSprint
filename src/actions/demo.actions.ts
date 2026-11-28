@@ -13,6 +13,7 @@ import { toTaskDTO } from "@/lib/realtime-protocol";
 import { broadcastOrgEvent } from "@/server/realtime-hub";
 import { roleSchema } from "@/server/services/workspace";
 import { seedDemoWorkspace, simulateTeammateActivity, switchDemoRole } from "@/server/services/demo";
+import { DEMO_EMAIL_DOMAIN } from "@/server/services/auth-emails";
 
 /**
  * 1-click recruiter demo: creates a throwaway demo account + its own seeded
@@ -21,14 +22,13 @@ import { seedDemoWorkspace, simulateTeammateActivity, switchDemoRole } from "@/s
  */
 export async function launchDemoAction() {
   const id = randomBytes(4).toString("hex");
-  const { user } = await auth.api.signUpEmail({
-    body: {
-      name: "Demo Reviewer",
-      email: `reviewer-${id}@demo.syncsprint.local`,
-      password: randomBytes(24).toString("base64url"),
-    },
-  });
-  await db.update(users).set({ isDemo: true }).where(eq(users.id, user.id));
+  const email = `reviewer-${id}${DEMO_EMAIL_DOMAIN}`;
+  const password = randomBytes(24).toString("base64url");
+  const { user, token } = await auth.api.signUpEmail({ body: { name: "Demo Reviewer", email, password } });
+  // Demo addresses can't receive mail: mark the throwaway account verified, then sign in
+  // (when email verification is required, sign-up itself doesn't start a session).
+  await db.update(users).set({ isDemo: true, emailVerified: true }).where(eq(users.id, user.id));
+  if (!token) await auth.api.signInEmail({ body: { email, password } });
   const org = await seedDemoWorkspace(db, user.id);
   redirect(`/w/${org.slug}/projects/ENG`);
 }

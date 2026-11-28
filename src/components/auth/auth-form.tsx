@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { KeyRound, ShieldCheck } from "lucide-react";
+import { KeyRound, MailCheck, ShieldCheck } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -19,7 +19,8 @@ export function AuthForm({ mode, providers }: { mode: "sign-in" | "sign-up"; pro
   // Only allow same-origin relative redirects (no open redirect via ?next=//evil.com).
   const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/w";
   const [pending, setPending] = useState(false);
-  const [step, setStep] = useState<"credentials" | "two-factor" | "sso">("credentials");
+  const [step, setStep] = useState<"credentials" | "two-factor" | "sso" | "verify">("credentials");
+  const [pendingEmail, setPendingEmail] = useState("");
 
   const done = () => {
     router.push(safeNext);
@@ -33,13 +34,24 @@ export function AuthForm({ mode, providers }: { mode: "sign-in" | "sign-up"; pro
     const email = String(f.get("email"));
     const password = String(f.get("password"));
     if (mode === "sign-up") {
-      const { error } = await authClient.signUp.email({ email, password, name: String(f.get("name")) });
+      // callbackURL: where the "Confirm email" link lands (signed in) once verified.
+      const { data, error } = await authClient.signUp.email({ email, password, name: String(f.get("name")), callbackURL: safeNext });
       setPending(false);
       if (error) return void toast.error(error.message ?? "Couldn't create the account");
+      // No session yet means this server wants the email confirmed first.
+      if (!data?.token) {
+        setPendingEmail(email);
+        return setStep("verify");
+      }
       return done();
     }
-    const { data, error } = await authClient.signIn.email({ email, password });
+    const { data, error } = await authClient.signIn.email({ email, password, callbackURL: safeNext });
     setPending(false);
+    if (error?.status === 403 || error?.code === "EMAIL_NOT_VERIFIED") {
+      // Better Auth has just sent a fresh confirmation link (sendOnSignIn).
+      setPendingEmail(email);
+      return setStep("verify");
+    }
     if (error) return void toast.error(error.message ?? "Authentication failed");
     // Two-step sign-in is on for this account: ask for the code before any session exists.
     if (data && "twoFactorRedirect" in data && data.twoFactorRedirect) return setStep("two-factor");
@@ -51,6 +63,7 @@ export function AuthForm({ mode, providers }: { mode: "sign-in" | "sign-up"; pro
 
   if (step === "two-factor") return <TwoFactorStep onDone={done} onBack={() => setStep("credentials")} />;
   if (step === "sso") return <SsoStep callbackURL={safeNext} onBack={() => setStep("credentials")} />;
+  if (step === "verify") return <VerifyEmailStep email={pendingEmail} callbackURL={safeNext} onBack={() => setStep("credentials")} />;
 
   const other = mode === "sign-in" ? "sign-up" : "sign-in";
   return (
@@ -70,7 +83,12 @@ export function AuthForm({ mode, providers }: { mode: "sign-in" | "sign-up"; pro
           <Input id="email" name="email" type="email" required autoComplete="email" />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="password">Password</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password">Password</Label>
+            {mode === "sign-in" && (
+              <Link href="/forgot-password" className="text-[13px] font-medium text-primary hover:underline">Forgot password?</Link>
+            )}
+          </div>
           <Input id="password" name="password" type="password" required minLength={8} autoComplete={mode === "sign-in" ? "current-password" : "new-password"} />
         </div>
         <Button className="mt-2 w-full" size="lg" disabled={pending}>
@@ -236,5 +254,36 @@ function OAuthErrorNotice({ code }: { code: string }) {
         </>
       )}
     </div>
+  );
+}
+
+/** Shown after sign-up (or a sign-in before confirming): the account exists, the email isn't confirmed yet. */
+function VerifyEmailStep({ email, callbackURL, onBack }: { email: string; callbackURL: string; onBack: () => void }) {
+  const [sending, setSending] = useState(false);
+  const [sentAgain, setSentAgain] = useState(false);
+  async function resend() {
+    setSending(true);
+    const { error } = await authClient.sendVerificationEmail({ email, callbackURL });
+    setSending(false);
+    if (error) return void toast.error(error.status === 429 ? "Please wait a minute before asking again." : (error.message ?? "Couldn't send the email"));
+    setSentAgain(true);
+    toast.success("Sent a new link");
+  }
+  return (
+    <Card className="w-full max-w-md border-border p-8 shadow-lift">
+      <MailCheck className="h-8 w-8 text-primary" />
+      <h1 className="mt-3 text-2xl font-semibold tracking-tight">Check your inbox</h1>
+      <p className="mt-2 text-[15px] leading-relaxed text-muted">
+        We sent a confirmation link to <b className="text-foreground">{email || "your email"}</b>. Open it to finish setting up your account; it signs you in
+        automatically. The link works for 24 hours.
+      </p>
+      <p className="mt-3 text-[14px] leading-relaxed text-subtle">Nothing there? Check spam or promotions, then send a new link.</p>
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <Button variant="outline" disabled={sending || !email} onClick={() => void resend()}>
+          {sending ? "Sending…" : sentAgain ? "Send another link" : "Send a new link"}
+        </Button>
+        <button className="cursor-pointer text-[14px] text-muted hover:underline" onClick={onBack}>Use a different email</button>
+      </div>
+    </Card>
   );
 }
